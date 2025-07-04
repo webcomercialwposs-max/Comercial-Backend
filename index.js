@@ -83,6 +83,62 @@ app.post('/api/auth/register', async (req, res) => {
 });
 
 
+// Ruta para el inicio de sesión de usuarios
+app.post('/api/auth/login', async (req, res) => {
+    const { username, password } = req.body; // Extrae credenciales del cuerpo de la petición
+
+    try {
+        // Buscar el usuario por username o email
+        const userResult = await query(
+            'SELECT user_id, username, password_hash, email, role_id, is_active FROM users WHERE username = $1 OR email = $1',
+            [username]
+        );
+
+        if (userResult.rows.length === 0) {
+            return res.status(401).json({ message: 'Credenciales inválidas.' }); // Usuario no encontrado
+        }
+
+        const user = userResult.rows[0];
+
+        // Verificar si el usuario está activo
+        if (!user.is_active) {
+            return res.status(401).json({ message: 'Tu cuenta está inactiva. Contacta al administrador.' });
+        }
+
+        // Comparar la contraseña proporcionada con el hash almacenado usando bcrypt
+        const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+
+        if (!isPasswordValid) {
+            return res.status(401).json({ message: 'Credenciales inválidas.' }); // Contraseña incorrecta
+        }
+
+        // Obtener el nombre del rol para incluirlo en el token
+        const roleNameResult = await query('SELECT role_name FROM roles WHERE role_id = $1', [user.role_id]);
+        const role_name = roleNameResult.rows.length > 0 ? roleNameResult.rows[0].role_name : 'unknown';
+
+        // Verificar que JWT_SECRET esté configurado en .env
+        if (!process.env.JWT_SECRET) {
+            console.error('Error: JWT_SECRET no está definido en las variables de entorno.');
+            return res.status(500).json({ message: 'Error interno del servidor: clave secreta JWT no configurada.' });
+        }
+
+        // Generar un JSON Web Token (JWT) con el ID de usuario, username y rol
+        const token = jwt.sign(
+            { user_id: user.user_id, username: user.username, role: role_name },
+            process.env.JWT_SECRET, // Clave secreta para firmar el token
+            { expiresIn: '1h' } // Token expira en 1 hora
+        );
+
+        res.status(200).json({ message: 'Inicio de sesión exitoso.', token }); // Respuesta exitosa con el token
+
+    } catch (error) {
+        console.error('Error durante el inicio de sesión:', error);
+        res.status(500).json({ message: 'Error interno del servidor durante el inicio de sesión.' });
+    }
+});
+
+
+
 // Iniciar el servidor
 app.listen(PORT, () => {
     console.log(`Servidor escuchando en el puerto ${PORT}`);
