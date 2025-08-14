@@ -2,13 +2,13 @@
 const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/adminController.js');
-// Importa la función de autenticación directamente, ya que se exporta como default
-const { authenticateFirebaseToken, authorizeRoles } = require('../middlewares/authMiddlewares.js');
+// Importa la función de autenticación y autorización
+const { isAuthenticated, authorizeRoles } = require('../middlewares/authMiddlewares.js');
 
 // Middleware para todas las rutas de administrador:
-// 1. authenticateFirebaseToken: Verifica que el usuario esté logueado y tenga un token válido de Firebase.
+// 1. isAuthenticated: Verifica que el usuario esté logueado y tenga un token válido de Firebase.
 // 2. authorizeRoles(['Administrador']): Verifica que el usuario tenga el rol 'Administrador'.
-router.use(authenticateFirebaseToken); // Usamos el nombre correcto de la función importada
+router.use(isAuthenticated); 
 router.use(authorizeRoles(['Administrador']));
 
 // Ruta para obtener todas las peticiones de rol pendientes
@@ -23,12 +23,17 @@ router.put('/role-requests/:request_id/approve', adminController.approveRoleRequ
 // PUT /api/admin/role-requests/:request_id/reject
 router.put('/role-requests/:request_id/reject', adminController.rejectRoleRequest);
 
-// ✅ RUTAS CORREGIDAS - usando los nombres correctos de las funciones del controlador
-router.get('/users', adminController.fetchAllUsers);           // Cambio: getAllUsers → fetchAllUsers
-router.get('/roles', adminController.fetchRoles);             // Cambio: getAllRoles → fetchRoles
-router.put('/users/:userId/role', adminController.updateUserRole); // Cambio: :user_id → :userId y PATCH → PUT
+// Rutas de gestión de usuarios y roles
+router.get('/users', adminController.fetchAllUsers);
+router.get('/roles', adminController.fetchRoles);
+router.put('/users/:userId/role', adminController.updateUserRole);
 
 // Ruta adicional para eliminar usuarios (si la necesitas)
 router.delete('/users/:userId', adminController.deleteUser);
+
+// NUEVA RUTA: Para bloquear/desbloquear usuarios
+// PUT /api/admin/users/:firebaseUid/block
+// Esta ruta usa el firebaseUid, tal como lo llama tu frontend.
+router.put('/users/:firebaseUid/block', adminController.toggleUserBlockStatus);
 
 module.exports = router;

@@ -3,6 +3,9 @@ const { pool } = require('../db/db.js'); // Asegúrate de que la ruta a tu archi
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 
+// Si usas Firebase Admin SDK para deshabilitar/habilitar usuarios directamente en Firebase Auth
+// const admin = require('firebase-admin'); // Descomentar si lo necesitas
+
 // Función para obtener todas las solicitudes de rol pendientes
 exports.getPendingRoleRequests = async (req, res) => {
     let client;
@@ -119,7 +122,7 @@ exports.rejectRoleRequest = async (req, res) => {
     }
 };
 
-// Función para obtener todos los usuarios con sus perfiles y roles
+// Función para obtener todos los usuarios con sus perfiles, roles y estado de bloqueo
 exports.fetchAllUsers = async (req, res) => {
     console.log('adminController: Accediendo a fetchAllUsers. Usuario autenticado:', req.user?.email, 'Rol:', req.user?.role_name);
     let client;
@@ -136,7 +139,8 @@ exports.fetchAllUsers = async (req, res) => {
                 up.phone,
                 up.city,
                 u.created_at AS registration_date,
-                COALESCE(rr.status, 'none') as admin_request_status
+                COALESCE(rr.status, 'none') as admin_request_status,
+                u.is_blocked -- Agregado para obtener el estado de bloqueo
             FROM users u
             JOIN roles r ON u.role_id = r.role_id
             LEFT JOIN user_profiles up ON u.user_id = up.user_id
@@ -288,6 +292,80 @@ exports.deleteUser = async (req, res) => {
     } finally {
         if (client) {
             client.release(); // Liberar el cliente de la pool
+        }
+    }
+};
+
+// NUEVA FUNCIÓN: Para bloquear/desbloquear usuarios por Firebase UID
+exports.toggleUserBlockStatus = async (req, res) => {
+    const { firebaseUid } = req.params; // Obtiene el Firebase UID de los parámetros de la URL
+    const { isBlocked } = req.body;     // Obtiene el nuevo estado de bloqueo (boolean) del cuerpo de la solicitud
+
+    console.log(`adminController: Recibida solicitud para ${isBlocked ? 'bloquear' : 'desbloquear'} usuario con Firebase UID: ${firebaseUid}`);
+    console.log(`adminController: Estado de bloqueo solicitado: ${isBlocked}`);
+
+    if (typeof isBlocked === 'undefined' || typeof isBlocked !== 'boolean') {
+        return res.status(400).json({ message: 'El estado de bloqueo (isBlocked) es requerido y debe ser un booleano.' });
+    }
+
+    let client;
+    try {
+        client = await pool.connect();
+        await client.query('BEGIN'); // Iniciar transacción
+
+        // 1. Encontrar al usuario en la base de datos por su firebase_uid
+        const userResult = await client.query('SELECT user_id, firebase_uid, is_blocked FROM users WHERE firebase_uid = $1', [firebaseUid]);
+
+        if (userResult.rows.length === 0) {
+            await client.query('ROLLBACK');
+            console.warn(`adminController: Usuario con Firebase UID ${firebaseUid} no encontrado en la base de datos.`);
+            return res.status(404).json({ message: 'Usuario no encontrado para bloquear/desbloquear.' });
+        }
+
+        const user = userResult.rows[0];
+        console.log(`adminController: Usuario encontrado en DB: ID=${user.user_id}, UID=${user.firebase_uid}, Bloqueado actualmente=${user.is_blocked}`);
+
+        // 2. Actualizar el estado is_blocked en la tabla 'users'
+        const updateResult = await client.query('UPDATE users SET is_blocked = $1 WHERE user_id = $2 RETURNING *', [isBlocked, user.user_id]);
+
+        if (updateResult.rows.length === 0) {
+            await client.query('ROLLBACK');
+            console.error(`adminController: Fallo al actualizar el estado de bloqueo para el usuario con ID ${user.user_id}.`);
+            return res.status(500).json({ message: 'Error al actualizar el estado de bloqueo del usuario.' });
+        }
+
+        const updatedUser = updateResult.rows[0];
+        console.log(`adminController: Usuario ${updatedUser.firebase_uid} ${isBlocked ? 'bloqueado' : 'desbloqueado'} exitosamente en la base de datos.`);
+
+        // 3. (Opcional) Si también estás usando Firebase Authentication para gestionar el estado de "desactivado"
+        //    Descomenta y adapta esta sección si es relevante para tu flujo.
+        /*
+        if (admin) { // Asegúrate de que `admin` de firebase-admin esté importado y configurado
+            try {
+                await admin.auth().updateUser(firebaseUid, { disabled: isBlocked });
+                console.log(`adminController: Usuario ${firebaseUid} ${isBlocked ? 'deshabilitado' : 'habilitado'} en Firebase Authentication.`);
+            } catch (firebaseError) {
+                console.error(`adminController: Error al actualizar el estado de Firebase Auth para ${firebaseUid}:`, firebaseError.message);
+                // Decide si revertir la transacción de DB si Firebase Auth falla
+                // await client.query('ROLLBACK');
+                // return res.status(500).json({ message: 'Error al actualizar el estado en Firebase Authentication.' });
+                // O solo loggear y continuar si la DB es la fuente principal de verdad
+            }
+        }
+        */
+
+        await client.query('COMMIT'); // Confirmar la transacción
+        res.status(200).json({ message: `Usuario ${isBlocked ? 'bloqueado' : 'desbloqueado'} exitosamente.`, updatedUser: updatedUser });
+
+    } catch (error) {
+        if (client) {
+            await client.query('ROLLBACK'); // Revertir la transacción en caso de error
+        }
+        console.error('adminController: Error al bloquear/desbloquear usuario:', error);
+        res.status(500).json({ message: error.message || 'Error interno del servidor al procesar la solicitud de bloqueo/desbloqueo.' });
+    } finally {
+        if (client) {
+            client.release();
         }
     }
 };

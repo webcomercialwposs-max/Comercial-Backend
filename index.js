@@ -2,17 +2,14 @@
 require('dotenv').config(); // Carga las variables de entorno desde .env
 const express = require('express');
 const cors = require('cors');
-const admin = require('firebase-admin'); // Importa el paquete 'firebase-admin' directamente aquí
-const authRoutes = require('./routes/authRoutes.js'); // Importa tus rutas de autenticación
-const adminRoutes = require('./routes/adminRoutes.js'); // Importa tus rutas de administración
-const db = require('./db/db.js'); // Asegúrate de que tu pool de PostgreSQL esté importado y conectado
+const admin = require('firebase-admin');
+const authRoutes = require('./routes/authRoutes.js');
+const adminRoutes = require('./routes/adminRoutes.js');
+const userRoutes = require('./routes/userRoutes.js');
+const db = require('./db/db.js');
 
 // --- INICIALIZACIÓN DE FIREBASE ADMIN SDK ---
-// ¡IMPORTANTE! Reemplaza con la ruta REAL a tu archivo de clave de servicio JSON
-// Asegúrate de que el archivo se llame 'serviceAccountKey.json' y esté en la misma carpeta que index.js.
 const serviceAccount = require('./serviceAccountKey.json'); 
-
-// Asegúrate de que esta línea se ejecute solo UNA VEZ al iniciar el servidor
 if (!admin.apps.length) { 
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
@@ -23,28 +20,23 @@ if (!admin.apps.length) {
 }
 
 const app = express();
-const port = process.env.PORT || 3000; // Define el puerto del servidor
+const port = process.env.PORT || 3000;
 
 // --- Middlewares ---
-// Middleware para parsear el cuerpo de las peticiones JSON
 app.use(express.json());
-
-// Configura CORS (Cross-Origin Resource Sharing)
 app.use(cors());
 
 // --- Rutas de la API ---
-// Usar las rutas de autenticación
 app.use('/api/auth', authRoutes);
-
-// Usar las rutas de administración
 app.use('/api/admin', adminRoutes);
+app.use('/api/user', userRoutes);
 
 // --- Ruta de prueba básica ---
 app.get('/', (req, res) => {
-    res.send('API de autenticación está funcionando!');
+  res.send('API de autenticación está funcionando!');
 });
 
 // --- Iniciar el servidor ---
 app.listen(port, () => {
-    console.log(`Servidor escuchando en http://localhost:${port}`);
+  console.log(`Servidor escuchando en http://localhost:${port}`);
 });
