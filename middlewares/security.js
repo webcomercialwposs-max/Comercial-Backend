@@ -1,4 +1,3 @@
-// middlewares/security.js
 const fs = require('fs');
 const path = require('path');
 
@@ -85,7 +84,7 @@ const cleanOldLogs = () => {
 const formatLogEntry = (level, message, metadata = {}) => {
     const timestamp = new Date().toISOString();
     
-    // Sanitizar metadatos para evitar información sensible
+    // Sanitizar metadatos para evitar información sensible y evitar errores de serialización
     const sanitizedMetadata = sanitizeLogMetadata(metadata);
     
     const logEntry = {
@@ -100,6 +99,7 @@ const formatLogEntry = (level, message, metadata = {}) => {
 
 /**
  * Sanitizar metadatos del log para evitar fugas de información sensible
+ * Agregado manejo de errores para evitar que el logger falle.
  */
 const sanitizeLogMetadata = (metadata) => {
     const sanitized = { ...metadata };
@@ -107,13 +107,21 @@ const sanitizeLogMetadata = (metadata) => {
     // Lista de campos sensibles a sanitizar
     const sensitiveFields = [
         'password', 'token', 'authorization', 'cookie', 'session',
-        'firebase_uid', 'email', 'phone', 'first_name', 'last_name'
+        'firebase_uid', 'email', 'phone', 'first_name', 'last_name', 'jwt',
+        'idToken', 'error' // Añadido 'error' para sanear el objeto de error
     ];
     
     const sanitizeValue = (value, key) => {
         const lowerKey = key.toLowerCase();
         
         if (sensitiveFields.some(field => lowerKey.includes(field))) {
+            // Manejar el caso del objeto de error de forma segura
+            if (lowerKey.includes('error') && typeof value === 'object' && value !== null) {
+                return {
+                    message: value.message || 'Error Desconocido',
+                    code: value.code || 'N/A'
+                };
+            }
             if (typeof value === 'string' && value.length > 8) {
                 return value.substring(0, 4) + '***' + value.substring(value.length - 4);
             }
@@ -129,10 +137,15 @@ const sanitizeLogMetadata = (metadata) => {
         if (typeof obj === 'object' && !Array.isArray(obj)) {
             const result = {};
             for (const [key, value] of Object.entries(obj)) {
-                if (typeof value === 'object' && value !== null) {
-                    result[key] = sanitizeObject(value);
-                } else {
-                    result[key] = sanitizeValue(value, key);
+                try {
+                    if (typeof value === 'object' && value !== null) {
+                        result[key] = sanitizeObject(value);
+                    } else {
+                        result[key] = sanitizeValue(value, key);
+                    }
+                } catch (e) {
+                    // Si algo falla al sanear, usamos un valor de fallback
+                    result[key] = 'ERROR_SANITIZING';
                 }
             }
             return result;
@@ -281,8 +294,8 @@ const detectSuspiciousActivity = (req, res, next) => {
     const suspiciousPatterns = [
         /(<script|javascript:|data:)/i,  // XSS attempts
         /(union|select|insert|update|delete|drop|exec)/i,  // SQL injection
-        /(\.\.\/|\.\.\\)/,  // Path traversal
-        /(<\?php|<\%)/i,  // Server-side injection
+        /(..\/|..\\)/,  // Path traversal
+        /(<\?php|<%) /i,  // Server-side injection
     ];
     
     const checkForPatterns = (data) => {
@@ -295,11 +308,11 @@ const detectSuspiciousActivity = (req, res, next) => {
         return false;
     };
     
-    // Verificar parámetros de URL
+    // Verificar parámetros de URL, cuerpo y parámetros de ruta
     const suspicious = checkForPatterns(req.originalUrl) ||
-                     checkForPatterns(req.body) ||
-                     checkForPatterns(req.query) ||
-                     checkForPatterns(req.params);
+                      checkForPatterns(req.body) ||
+                      checkForPatterns(req.query) ||
+                      checkForPatterns(req.params);
     
     if (suspicious) {
         securityLogger.warn('Suspicious activity detected', {
