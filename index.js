@@ -1,3 +1,8 @@
+app.use((req, res, next) => {
+  console.log('Solicitud entrante para:', req.originalUrl);
+  next();
+});
+
 // index.js (Archivo principal del backend)
 require('dotenv').config(); // Carga las variables de entorno desde .env
 const express = require('express');
