@@ -37,22 +37,25 @@ try {
 const app = express();
 const port = process.env.PORT || 3000;
 
+// ✅ CONFIGURACIÓN CRÍTICA PARA PROXIES (RENDER, HEROKU, ETC.)
+app.set('trust proxy', 1);
+
 // --- Middlewares de Depuración y CORS (Orden Importante) ---
 // Middleware para loguear cada solicitud entrante
 app.use((req, res, next) => {
   console.log('Solicitud entrante para:', req.originalUrl);
+  console.log('IP del cliente:', req.ip || 'no disponible');
   next();
 });
 
 // Configuración de CORS para permitir solicitudes desde tu frontend
 const corsOptions = {
-    origin: 'https://comercial-wposs-ft.vercel.app', // ✅ URL de tu frontend en Vercel
-    credentials: true, // ✅ Permite cookies y encabezados de autorización (tokens JWT, etc.)
+    origin: 'https://comercial-wposs-ft.vercel.app', // URL de tu frontend en Vercel
+    credentials: true, // Permite cookies y encabezados de autorización (tokens JWT, etc.)
     optionsSuccessStatus: 200,
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization']
 };
-
 app.use(cors(corsOptions));
 
 // Middleware para parsear el cuerpo de las solicitudes en formato JSON
@@ -68,6 +71,25 @@ app.get('/', (req, res) => {
   res.send('API de autenticación está funcionando!');
 });
 
+// --- Manejo de errores globales ---
+app.use((error, req, res, next) => {
+  console.error('Error global capturado:', error.message);
+  console.error('Stack trace:', error.stack);
+  
+  res.status(500).json({
+    message: 'Error interno del servidor',
+    ...(process.env.NODE_ENV === 'development' && { error: error.message })
+  });
+});
+
+// --- Manejo de rutas no encontradas ---
+app.use('*', (req, res) => {
+  res.status(404).json({
+    message: 'Ruta no encontrada',
+    requestedUrl: req.originalUrl
+  });
+});
+
 // --- Manejo de errores no capturados ---
 process.on('unhandledRejection', (err) => {
   console.error('Unhandled Promise Rejection:', err);
@@ -80,4 +102,6 @@ process.on('uncaughtException', (err) => {
 // --- Iniciar el servidor ---
 app.listen(port, '0.0.0.0', () => {
   console.log(`Servidor escuchando en puerto ${port}`);
+  console.log(`Modo: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`Trust proxy configurado: ${app.get('trust proxy')}`);
 });
