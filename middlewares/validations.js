@@ -185,52 +185,131 @@ const validateUserProfileData = (data) => {
 };
 
 /**
- * Función auxiliar para obtener la IP del cliente de forma segura.
+ * 🔧 FUNCIÓN CORREGIDA: Obtener IP del cliente de forma segura
  * Revisa los encabezados que envían los proxies como Render.
  */
 const getClientIp = (req) => {
     // Protección contra 'req' no definido
-    if (!req || !req.headers) {
-        return null; 
+    if (!req) {
+        return 'unknown';
     }
-    return req.headers['cf-connecting-ip'] ||
-           req.headers['x-forwarded-for'] ||
-           req.connection?.remoteAddress ||
-           req.socket?.remoteAddress ||
-           req.connection?.socket?.remoteAddress;
+
+    // Intentar obtener IP de diferentes fuentes
+    let ip = null;
+    
+    // Headers de proxy/load balancer (más confiables)
+    if (req.headers) {
+        ip = req.headers['cf-connecting-ip'] ||          // Cloudflare
+             req.headers['x-real-ip'] ||                 // Nginx
+             req.headers['x-forwarded-for'] ||           // Standard proxy header
+             req.headers['x-client-ip'] ||               // Apache
+             req.headers['x-cluster-client-ip'];         // Cluster
+    }
+    
+    // Si viene de x-forwarded-for, tomar solo la primera IP (la del cliente original)
+    if (ip && ip.includes(',')) {
+        ip = ip.split(',')[0].trim();
+    }
+    
+    // Fallback a propiedades de socket (menos confiables en producción)
+    if (!ip) {
+        ip = req.socket?.remoteAddress ||
+             req.ip ||
+             (req.connection && req.connection.remoteAddress) ||
+             'unknown';
+    }
+    
+    // Limpiar IPv6 localhost
+    if (ip === '::1' || ip === '::ffff:127.0.0.1') {
+        ip = '127.0.0.1';
+    }
+    
+    return ip || 'unknown';
 };
 
 /**
- * Validar datos de request básicos.
- * Ahora se define como un middleware para asegurar que recibe req, res, y next.
+ * 🔧 MIDDLEWARE CORREGIDO: Validar datos de request básicos.
  */
 const validateRequestData = (req, res, next) => {
     try {
+        // Verificar que res existe (esto debe resolver tu error)
+        if (!res || typeof res.status !== 'function') {
+            console.error('ERROR: Objeto res no disponible o inválido en validateRequestData');
+            throw new Error('Error interno del servidor');
+        }
+
         // Validaciones básicas de request
         if (!req || typeof req !== 'object') {
             throw new Error('Request inválido.');
         }
         
-        // ✅ CORRECCIÓN: Usar la nueva función para validar la IP.
+        // ✅ CORRECCIÓN: Obtener IP pero no fallar si no está disponible
         const clientIp = getClientIp(req);
-        if (!clientIp || typeof clientIp !== 'string') {
-            throw new Error('IP del cliente no válida.');
+        
+        // Solo registrar en log si no se pudo obtener IP, pero no fallar la request
+        if (!clientIp || clientIp === 'unknown') {
+            console.warn('⚠️ No se pudo determinar la IP del cliente');
         }
         
-        // Validar User-Agent si existe
-        if (req.get && req.get('User-Agent') && req.get('User-Agent').length > 500) {
-            throw new Error('User-Agent demasiado largo.');
+        // Validar User-Agent si existe (hacer más permisivo)
+        const userAgent = req.get && req.get('User-Agent');
+        if (userAgent && userAgent.length > 1000) { // Aumentamos el límite
+            console.warn('⚠️ User-Agent muy largo, truncando...');
         }
+
+        // Almacenar la IP en el request para uso posterior
+        req.clientIp = clientIp;
 
         // Si todo es válido, continuar al siguiente middleware o ruta
         next();
 
     } catch (error) {
-        // Enviar una respuesta de error si la validación falla
-        res.status(400).json({
-            success: false,
-            message: error.message
-        });
+        // Verificar que res sigue siendo válido antes de enviar respuesta
+        if (res && typeof res.status === 'function') {
+            return res.status(400).json({
+                success: false,
+                message: error.message || 'Error de validación'
+            });
+        } else {
+            // Si res no es válido, logear el error y no enviar respuesta
+            console.error('ERROR CRÍTICO: No se puede enviar respuesta de error:', error.message);
+        }
+    }
+};
+
+/**
+ * 🆕 MIDDLEWARE OPCIONAL: Versión más estricta para rutas que requieren IP válida
+ */
+const validateRequestDataStrict = (req, res, next) => {
+    try {
+        if (!res || typeof res.status !== 'function') {
+            console.error('ERROR: Objeto res no disponible en validateRequestDataStrict');
+            throw new Error('Error interno del servidor');
+        }
+
+        if (!req || typeof req !== 'object') {
+            throw new Error('Request inválido.');
+        }
+        
+        const clientIp = getClientIp(req);
+        
+        // En modo estricto, sí requerimos una IP válida
+        if (!clientIp || clientIp === 'unknown') {
+            throw new Error('No se pudo determinar la IP del cliente.');
+        }
+        
+        req.clientIp = clientIp;
+        next();
+
+    } catch (error) {
+        if (res && typeof res.status === 'function') {
+            return res.status(400).json({
+                success: false,
+                message: error.message
+            });
+        } else {
+            console.error('ERROR CRÍTICO en validateRequestDataStrict:', error.message);
+        }
     }
 };
 
@@ -238,5 +317,7 @@ module.exports = {
     sanitizeAndValidate,
     validateEmailQuery,
     validateUserProfileData,
-    validateRequestData
+    validateRequestData,
+    validateRequestDataStrict,  // Nueva función más estricta
+    getClientIp                 // Exportar por si la necesitas en otros lugares
 };
