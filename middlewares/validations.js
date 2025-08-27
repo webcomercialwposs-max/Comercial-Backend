@@ -185,6 +185,18 @@ const validateUserProfileData = (data) => {
 };
 
 /**
+ * Función auxiliar para obtener la IP del cliente de forma segura.
+ * Revisa los encabezados que envían los proxies como Render.
+ */
+const getClientIp = (req) => {
+    return req.headers['cf-connecting-ip'] ||
+           req.headers['x-forwarded-for'] ||
+           req.connection.remoteAddress ||
+           req.socket.remoteAddress ||
+           req.connection.socket.remoteAddress;
+};
+
+/**
  * Validar datos de request básicos
  */
 const validateRequestData = (req) => {
@@ -193,8 +205,9 @@ const validateRequestData = (req) => {
         throw new Error('Request inválido.');
     }
     
-    // Validar IP
-    if (!req.ip || typeof req.ip !== 'string') {
+    // ✅ CORRECCIÓN: Usar la nueva función para validar la IP.
+    const clientIp = getClientIp(req);
+    if (!clientIp || typeof clientIp !== 'string') {
         throw new Error('IP del cliente no válida.');
     }
     
