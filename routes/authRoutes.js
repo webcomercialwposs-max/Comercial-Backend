@@ -46,16 +46,50 @@ const logAuthEvent = (eventType) => {
             userAgent: req.get('User-Agent') || 'unknown',
             url: req.originalUrl,
             method: req.method,
-            hasAuthHeader: !!req.headers.authorization
+            hasIdTokenInBody: !!req.body?.idToken
         });
         next();
     };
 };
 
 /**
- * Middleware para validar formato básico de token Firebase antes del procesamiento
+ * Middleware para validar que el idToken esté en el body (CORREGIDO)
+ * Ya no busca en headers, sino en el body como espera el controlador
  */
-const validateFirebaseTokenFormat = (req, res, next) => {
+const validateFirebaseTokenInBody = (req, res, next) => {
+    const { idToken } = req.body;
+    
+    if (!idToken) {
+        securityLogger.warn('Firebase login attempt without token in body', {
+            ip: req.ip || 'unknown',
+            userAgent: req.get('User-Agent') || 'unknown',
+            hasBody: !!req.body,
+            bodyKeys: req.body ? Object.keys(req.body) : []
+        });
+        return res.status(400).json({ 
+            message: 'Se requiere el token de autenticación de Firebase.' 
+        });
+    }
+    
+    if (typeof idToken !== 'string' || idToken.length < 50) {
+        securityLogger.warn('Invalid Firebase token format in body', {
+            ip: req.ip || 'unknown',
+            tokenType: typeof idToken,
+            tokenLength: typeof idToken === 'string' ? idToken.length : 0
+        });
+        return res.status(400).json({ 
+            message: 'Token de autenticación inválido.' 
+        });
+    }
+    
+    next();
+};
+
+/**
+ * Middleware para validar formato básico de token Firebase en HEADERS 
+ * (solo para rutas que usan headers como /me, /profile)
+ */
+const validateFirebaseTokenInHeaders = (req, res, next) => {
     const authHeader = req.headers.authorization;
     
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -70,8 +104,8 @@ const validateFirebaseTokenFormat = (req, res, next) => {
     }
     
     const token = authHeader.split(' ')[1];
-    if (!token || token.length < 50) { // Tokens Firebase son largos
-        securityLogger.warn('Invalid Firebase token format', {
+    if (!token || token.length < 50) {
+        securityLogger.warn('Invalid Firebase token format in headers', {
             ip: req.ip || 'unknown',
             tokenLength: token ? token.length : 0
         });
@@ -84,7 +118,7 @@ const validateFirebaseTokenFormat = (req, res, next) => {
 };
 
 /**
- * Middleware para validar datos de perfil de usuario (CORREGIDO)
+ * Middleware para validar datos de perfil de usuario
  */
 const validateProfileData = (req, res, next) => {
     try {
@@ -140,17 +174,12 @@ router.use(detectSuspiciousActivity);
  * @description Ruta unificada de login y registro con Firebase
  * @access Public
  * 
- * PROTECCIONES APLICADAS:
- * Rate limiting estricto (5 intentos por 15 min)
- * Logging de eventos de seguridad
- * Validación básica de formato de token
- * Validación y sanitización de datos adicionales
- * Detección de actividad sospechosa
+ * CORREGIDO: Ahora valida el token en el body, no en headers
  */
 router.post('/firebase-login', 
     authRateLimit,                      // Límite estricto para login
     logAuthEvent('Firebase Login Attempt'), // Log del intento
-    validateFirebaseTokenFormat,        // Validación básica de token
+    validateFirebaseTokenInBody,        // CORREGIDO: Validar token en body
     validateProfileData,                // Validar datos adicionales opcionales
     authController.handleFirebaseLogin  // Controlador principal
 );
@@ -159,15 +188,11 @@ router.post('/firebase-login',
  * @route GET /api/auth/profile/:firebaseUid
  * @description Obtener perfil de usuario por Firebase UID
  * @access Private (requiere autenticación)
- * 
- * PROTECCIONES APLICADAS:
- * Rate limiting general
- * Autenticación requerida
- * Logging de accesos al perfil
  */
 router.get('/profile/:firebaseUid', 
     generalRateLimit,                   // Límite general
     logAuthEvent('Profile Access'),     // Log de acceso
+    validateFirebaseTokenInHeaders,     // Token en headers para esta ruta
     isAuthenticated,                    // Autenticación requerida
     authController.getUserProfileByFirebaseUid // Controlador
 );
@@ -176,16 +201,11 @@ router.get('/profile/:firebaseUid',
  * @route PUT /api/auth/profile
  * @description Actualizar perfil de usuario autenticado
  * @access Private (requiere autenticación)
- * 
- * PROTECCIONES APLICADAS:
- * Rate limiting general
- * Autenticación requerida
- * Validación de datos de entrada
- * Logging de modificaciones
  */
 router.put('/profile',
     generalRateLimit,                   // Límite general
     logAuthEvent('Profile Update'),     // Log de modificación
+    validateFirebaseTokenInHeaders,     // Token en headers para esta ruta
     isAuthenticated,                    // Autenticación requerida
     validateProfileData,                // Validar datos de entrada
     authController.updateUserProfile    // Controlador
@@ -199,6 +219,7 @@ router.put('/profile',
 router.get('/me',
     generalRateLimit,
     logAuthEvent('Current User Profile'),
+    validateFirebaseTokenInHeaders,     // Token en headers para esta ruta
     isAuthenticated,
     authController.getUserProfileByFirebaseUid
 );
