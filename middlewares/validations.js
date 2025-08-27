@@ -189,34 +189,49 @@ const validateUserProfileData = (data) => {
  * Revisa los encabezados que envían los proxies como Render.
  */
 const getClientIp = (req) => {
+    // Protección contra 'req' no definido
+    if (!req || !req.headers) {
+        return null; 
+    }
     return req.headers['cf-connecting-ip'] ||
            req.headers['x-forwarded-for'] ||
-           req.connection.remoteAddress ||
-           req.socket.remoteAddress ||
-           req.connection.socket.remoteAddress;
+           req.connection?.remoteAddress ||
+           req.socket?.remoteAddress ||
+           req.connection?.socket?.remoteAddress;
 };
 
 /**
- * Validar datos de request básicos
+ * Validar datos de request básicos.
+ * Ahora se define como un middleware para asegurar que recibe req, res, y next.
  */
-const validateRequestData = (req) => {
-    // Validaciones básicas de request
-    if (!req || typeof req !== 'object') {
-        throw new Error('Request inválido.');
+const validateRequestData = (req, res, next) => {
+    try {
+        // Validaciones básicas de request
+        if (!req || typeof req !== 'object') {
+            throw new Error('Request inválido.');
+        }
+        
+        // ✅ CORRECCIÓN: Usar la nueva función para validar la IP.
+        const clientIp = getClientIp(req);
+        if (!clientIp || typeof clientIp !== 'string') {
+            throw new Error('IP del cliente no válida.');
+        }
+        
+        // Validar User-Agent si existe
+        if (req.get && req.get('User-Agent') && req.get('User-Agent').length > 500) {
+            throw new Error('User-Agent demasiado largo.');
+        }
+
+        // Si todo es válido, continuar al siguiente middleware o ruta
+        next();
+
+    } catch (error) {
+        // Enviar una respuesta de error si la validación falla
+        res.status(400).json({
+            success: false,
+            message: error.message
+        });
     }
-    
-    // ✅ CORRECCIÓN: Usar la nueva función para validar la IP.
-    const clientIp = getClientIp(req);
-    if (!clientIp || typeof clientIp !== 'string') {
-        throw new Error('IP del cliente no válida.');
-    }
-    
-    // Validar User-Agent si existe
-    if (req.get && req.get('User-Agent') && req.get('User-Agent').length > 500) {
-        throw new Error('User-Agent demasiado largo.');
-    }
-    
-    return true;
 };
 
 module.exports = {
