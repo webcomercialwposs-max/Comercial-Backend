@@ -1,4 +1,4 @@
-// D:\Pagina comercial\Backend\routes\authRoutes.js - VERSIÓN CORREGIDA
+// authRoutes.js - VERSIÓN CORREGIDA
 
 const express = require('express');
 const router = express.Router();
@@ -85,15 +85,27 @@ const validateFirebaseTokenFormat = (req, res, next) => {
 };
 
 /**
- * Middleware para validar datos de perfil de usuario
+ * 🔧 MIDDLEWARE CORREGIDO: Validar datos de perfil de usuario
  */
-const validateProfileData = validateRequestData({
-    first_name: (value) => sanitizeAndValidate.validateName(value, 'Nombre'),
-    last_name: (value) => sanitizeAndValidate.validateName(value, 'Apellido'),
-    phone: (value) => sanitizeAndValidate.validatePhone(value),
-    city: (value) => sanitizeAndValidate.validateCity(value),
-    profile_picture_url: (value) => sanitizeAndValidate.validateProfilePictureUrl(value)
-});
+const validateProfileData = (req, res, next) => {
+    try {
+        // Solo validar si hay datos en el body
+        if (req.body && Object.keys(req.body).length > 0) {
+            // Usar la función correcta para validar datos de perfil
+            const validatedData = validateUserProfileData(req.body);
+            
+            // Reemplazar req.body con los datos validados y sanitizados
+            req.body = validatedData;
+        }
+        
+        next();
+    } catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
 
 // =============================================
 // APLICAR MIDDLEWARES GLOBALES PARA AUTH
@@ -117,6 +129,7 @@ router.use(detectSuspiciousActivity);
  * PROTECCIONES APLICADAS:
  * ✅ Rate limiting estricto (5 intentos por 15 min)
  * ✅ Logging de eventos de seguridad
+ * ✅ Validación básica de request
  * ✅ Validación básica de formato de token
  * ✅ Validación y sanitización de datos adicionales
  * ✅ Detección de actividad sospechosa
@@ -124,6 +137,7 @@ router.use(detectSuspiciousActivity);
 router.post('/firebase-login', 
     authRateLimit,                      // 🛡️ Límite estricto para login
     logAuthEvent('Firebase Login Attempt'), // 📝 Log del intento
+    validateRequestData,                // ✅ Validación básica de request
     validateFirebaseTokenFormat,        // 🔐 Validación básica de token
     validateProfileData,                // ✅ Validar datos adicionales opcionales
     authController.handleFirebaseLogin  // 🎯 Controlador principal
@@ -136,12 +150,14 @@ router.post('/firebase-login',
  * 
  * PROTECCIONES APLICADAS:
  * ✅ Rate limiting general
+ * ✅ Validación básica de request
  * ✅ Autenticación requerida
  * ✅ Logging de accesos al perfil
  */
 router.get('/profile/:firebaseUid', 
     generalRateLimit,                   // 🛡️ Límite general
     logAuthEvent('Profile Access'),     // 📝 Log de acceso
+    validateRequestData,                // ✅ Validación básica de request
     isAuthenticated,                    // 🔐 Autenticación requerida
     authController.getUserProfileByFirebaseUid // 🎯 Controlador
 );
@@ -153,6 +169,7 @@ router.get('/profile/:firebaseUid',
  * 
  * PROTECCIONES APLICADAS:
  * ✅ Rate limiting general
+ * ✅ Validación básica de request
  * ✅ Autenticación requerida
  * ✅ Validación de datos de entrada
  * ✅ Logging de modificaciones
@@ -160,6 +177,7 @@ router.get('/profile/:firebaseUid',
 router.put('/profile',
     generalRateLimit,                   // 🛡️ Límite general
     logAuthEvent('Profile Update'),     // 📝 Log de modificación
+    validateRequestData,                // ✅ Validación básica de request
     isAuthenticated,                    // 🔐 Autenticación requerida
     validateProfileData,                // ✅ Validar datos de entrada
     authController.updateUserProfile    // 🎯 Controlador
@@ -173,6 +191,7 @@ router.put('/profile',
 router.get('/me',
     generalRateLimit,
     logAuthEvent('Current User Profile'),
+    validateRequestData,                // ✅ Validación básica de request
     isAuthenticated,
     authController.getUserProfileByFirebaseUid
 );
