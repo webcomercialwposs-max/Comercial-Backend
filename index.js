@@ -24,7 +24,12 @@ const port = process.env.PORT || 3000;
 
 // --- Middlewares ---
 app.use(express.json());
-app.use(cors());
+app.use(cors({
+  origin: 'https://comercial-wposs-ft.vercel.app',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
 // --- Rutas de la API ---
 app.use('/api/auth', authRoutes);
