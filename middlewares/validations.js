@@ -1,5 +1,3 @@
-// middlewares/validations.js (versión corregida)
-
 const validator = require('validator');
 
 const sanitizeAndValidate = {
@@ -145,7 +143,115 @@ const sanitizeAndValidate = {
     }
 };
 
-// ... El resto del código permanece igual ...
+// ----------------------------------------------------
+// ✅ CORRECCIÓN: Agregar la definición de la función validateEmailQuery
+// ----------------------------------------------------
+const validateEmailQuery = (email) => {
+    if (!email) {
+        throw new Error('El correo electrónico es obligatorio.');
+    }
+    if (typeof email !== 'string' || !validator.isEmail(email)) {
+        throw new Error('El formato del correo electrónico no es válido.');
+    }
+    return email.toLowerCase();
+};
+
+// ----------------------------------------------------
+// ✅ CORRECCIÓN: Asegurar que todas las funciones que se usan
+// en otros archivos estén definidas y exportadas
+// ----------------------------------------------------
+const validateUserProfileData = (data) => {
+    // Implementación de esta función (ejemplo)
+    if (!data.email) {
+        throw new Error('El correo electrónico es obligatorio.');
+    }
+    // Lógica para validar el resto de los datos
+    return data;
+};
+
+// ... (El resto de tus funciones como validateRequestData, etc. si las tienes) ...
+const validateRequestData = (validators) => {
+    return (req, res, next) => {
+        try {
+            const dataToValidate = { ...req.body, ...req.params, ...req.query };
+            const errors = {};
+            let hasErrors = false;
+
+            for (const key in validators) {
+                if (dataToValidate[key] !== undefined) {
+                    try {
+                        const validatedValue = validators[key](dataToValidate[key]);
+                        // Asignar el valor sanitizado de vuelta a la solicitud
+                        if (req.body.hasOwnProperty(key)) {
+                            req.body[key] = validatedValue;
+                        } else if (req.params.hasOwnProperty(key)) {
+                            req.params[key] = validatedValue;
+                        } else if (req.query.hasOwnProperty(key)) {
+                            req.query[key] = validatedValue;
+                        }
+                    } catch (error) {
+                        errors[key] = error.message;
+                        hasErrors = true;
+                    }
+                }
+            }
+
+            if (hasErrors) {
+                const errorMessage = `Errores de validación: ${JSON.stringify(errors)}`;
+                return res.status(400).json({ message: errorMessage, details: errors });
+            }
+
+            next();
+        } catch (error) {
+            next(error);
+        }
+    };
+};
+
+const validateRequestDataStrict = (validators) => {
+    return (req, res, next) => {
+        try {
+            const dataToValidate = { ...req.body, ...req.params, ...req.query };
+            const errors = {};
+            let hasErrors = false;
+
+            for (const key in validators) {
+                if (dataToValidate[key] === undefined) {
+                    errors[key] = 'Este campo es obligatorio.';
+                    hasErrors = true;
+                } else {
+                    try {
+                        const validatedValue = validators[key](dataToValidate[key]);
+                        if (req.body.hasOwnProperty(key)) {
+                            req.body[key] = validatedValue;
+                        } else if (req.params.hasOwnProperty(key)) {
+                            req.params[key] = validatedValue;
+                        } else if (req.query.hasOwnProperty(key)) {
+                            req.query[key] = validatedValue;
+                        }
+                    } catch (error) {
+                        errors[key] = error.message;
+                        hasErrors = true;
+                    }
+                }
+            }
+
+            if (hasErrors) {
+                const errorMessage = `Errores de validación: ${JSON.stringify(errors)}`;
+                return res.status(400).json({ message: errorMessage, details: errors });
+            }
+
+            next();
+        } catch (error) {
+            next(error);
+        }
+    };
+};
+
+const getClientIp = (req) => {
+    // Implementación de esta función (ejemplo)
+    return req.ip || req.connection.remoteAddress || '';
+};
 
 module.exports = {
     sanitizeAndValidate,
