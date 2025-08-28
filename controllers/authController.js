@@ -1,5 +1,3 @@
-// controllers/authController.js - VERSIÓN SECUREZADA Y CORREGIDA
-
 const admin = require('firebase-admin');
 const { pool } = require('../db/db.js');
 const { validateUserProfileData, sanitizeAndValidate, validateEmailQuery } = require('../middlewares/validations');
@@ -25,7 +23,7 @@ const PREPARED_QUERIES = {
         FROM users u
         JOIN roles r ON u.role_id = r.role_id
         LEFT JOIN user_profiles up ON u.user_id = up.user_id
-        WHERE u.email = $1`, // Removido LOWER() innecesario
+        WHERE u.email = $1`,
     
     getUserById: `
         SELECT
@@ -85,7 +83,7 @@ const secureUpsertUserProfile = async (client, userId, validatedData) => {
 };
 
 /**
- * Función para validar y sanitizar datos de entrada de forma segura
+ * Función para validar y sanitizar datos de entrada de forma segura (VERSIÓN MEJORADA)
  */
 const validateAndSanitizeAdditionalData = (rawData) => {
     if (!rawData || typeof rawData !== 'object') {
@@ -93,47 +91,98 @@ const validateAndSanitizeAdditionalData = (rawData) => {
     }
 
     const validatedData = {};
+    const validationErrors = [];
 
     try {
-        // Validar cada campo si existe
-        if (rawData.first_name !== undefined && rawData.first_name !== null) {
-            validatedData.first_name = sanitizeAndValidate.validateName(
-                rawData.first_name, 'Nombre'
-            );
+        // ✅ Validar solo los campos presentes y no vacíos
+        if (rawData.first_name !== undefined && rawData.first_name !== null && rawData.first_name !== '') {
+            try {
+                validatedData.first_name = sanitizeAndValidate.validateName(
+                    rawData.first_name, 'Nombre'
+                );
+            } catch (error) {
+                validationErrors.push(error.message);
+            }
         }
         
-        if (rawData.last_name !== undefined && rawData.last_name !== null) {
-            validatedData.last_name = sanitizeAndValidate.validateName(
-                rawData.last_name, 'Apellido'
-            );
+        if (rawData.last_name !== undefined && rawData.last_name !== null && rawData.last_name !== '') {
+            try {
+                validatedData.last_name = sanitizeAndValidate.validateName(
+                    rawData.last_name, 'Apellido'
+                );
+            } catch (error) {
+                validationErrors.push(error.message);
+            }
         }
         
-        if (rawData.phone !== undefined && rawData.phone !== null) {
-            validatedData.phone = sanitizeAndValidate.validatePhone(rawData.phone);
+        if (rawData.phone !== undefined && rawData.phone !== null && rawData.phone !== '') {
+            try {
+                validatedData.phone = sanitizeAndValidate.validatePhone(rawData.phone);
+            } catch (error) {
+                validationErrors.push(error.message);
+            }
         }
         
-        if (rawData.city !== undefined && rawData.city !== null) {
-            validatedData.city = sanitizeAndValidate.validateCity(rawData.city);
+        if (rawData.city !== undefined && rawData.city !== null && rawData.city !== '') {
+            try {
+                validatedData.city = sanitizeAndValidate.validateCity(rawData.city);
+            } catch (error) {
+                validationErrors.push(error.message);
+            }
         }
         
-        if (rawData.profile_picture_url !== undefined && rawData.profile_picture_url !== null) {
-            validatedData.profile_picture_url = sanitizeAndValidate.validateProfilePictureUrl(
-                rawData.profile_picture_url
-            );
+        if (rawData.profile_picture_url !== undefined && rawData.profile_picture_url !== null && rawData.profile_picture_url !== '') {
+            try {
+                validatedData.profile_picture_url = sanitizeAndValidate.validateProfilePictureUrl(
+                    rawData.profile_picture_url
+                );
+            } catch (error) {
+                validationErrors.push(error.message);
+            }
+        }
+
+        // ✅ Campos adicionales que podrían venir del frontend
+        if (rawData.requested_role_name !== undefined && rawData.requested_role_name !== null && rawData.requested_role_name !== '') {
+            try {
+                // Usar validateText si no existe validateRoleName
+                validatedData.requested_role_name = sanitizeAndValidate.validateText(
+                    rawData.requested_role_name, 'Rol solicitado'
+                );
+            } catch (error) {
+                validationErrors.push(error.message);
+            }
+        }
+
+        if (rawData.isNewUser !== undefined && rawData.isNewUser !== null) {
+            // Validar que isNewUser sea booleano
+            if (typeof rawData.isNewUser === 'boolean') {
+                validatedData.isNewUser = rawData.isNewUser;
+            } else if (typeof rawData.isNewUser === 'string') {
+                validatedData.isNewUser = rawData.isNewUser.toLowerCase() === 'true';
+            } else {
+                validationErrors.push('isNewUser debe ser true o false');
+            }
+        }
+
+        // ✅ Si hay errores de validación, lanzar excepción
+        if (validationErrors.length > 0) {
+            throw new Error(`Errores de validación: ${validationErrors.join(', ')}`);
         }
 
         return validatedData;
+
     } catch (error) {
         securityLogger.warn('Data validation failed', {
             error: error.message,
-            rawDataKeys: Object.keys(rawData)
+            rawDataKeys: Object.keys(rawData),
+            validationErrors
         });
         throw new Error(`Datos inválidos: ${error.message}`);
     }
 };
 
 /**
- * Manejo seguro del login/registro de Firebase
+ * Manejo seguro del login/registro de Firebase (VERSIÓN CORREGIDA)
  */
 const handleFirebaseLogin = async (req, res) => {
     const startTime = Date.now();
@@ -157,7 +206,7 @@ const handleFirebaseLogin = async (req, res) => {
         const idToken = authHeader.split(' ')[1];
         
         // Validación básica del token
-        if (!idToken || idToken.length < 100) { // Tokens Firebase son largos
+        if (!idToken || idToken.length < 100) {
             return res.status(401).json({ 
                 message: 'Token de autenticación inválido.' 
             });
@@ -170,7 +219,7 @@ const handleFirebaseLogin = async (req, res) => {
         // 3. Verificar token con Firebase (con timeout)
         const tokenVerificationPromise = admin.auth().verifyIdToken(idToken);
         const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Token verification timeout')), 10000)
+            setTimeout(() => reject(new Error('Token verification timeout')), 5000) // Reducido a 5s
         );
         
         const decodedToken = await Promise.race([tokenVerificationPromise, timeoutPromise]);
@@ -192,11 +241,37 @@ const handleFirebaseLogin = async (req, res) => {
         }
 
         // 5. Validar y sanitizar email
-        // ✅ CORRECCIÓN: Llamar a la función del objeto 'sanitizeAndValidate'
-        const validatedEmail = sanitizeAndValidate.validateEmailQuery(email); 
+        const validatedEmail = email.toLowerCase().trim(); // ✅ Simple sanitización
         
-        // 6. Validar datos adicionales
-        const validatedAdditionalData = validateAndSanitizeAdditionalData(req.body);
+        // 6. ✅ CORRECCIÓN PRINCIPAL: Manejo robusto de datos adicionales
+        let validatedAdditionalData = {};
+        try {
+            // Solo procesar datos adicionales si existen y no están vacíos
+            if (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0) {
+                securityLogger.info('Datos adicionales recibidos', {
+                    keys: Object.keys(req.body),
+                    hasNewUser: req.body.isNewUser !== undefined,
+                    ip: req.ip
+                });
+                
+                validatedAdditionalData = validateAndSanitizeAdditionalData(req.body);
+                
+                securityLogger.info('Datos adicionales validados', {
+                    keys: Object.keys(validatedAdditionalData),
+                    ip: req.ip
+                });
+            }
+        } catch (validationError) {
+            await client.query('ROLLBACK');
+            securityLogger.warn('Validation error in additional data', {
+                error: validationError.message,
+                receivedKeys: req.body ? Object.keys(req.body) : [],
+                ip: req.ip
+            });
+            return res.status(400).json({ 
+                message: validationError.message 
+            });
+        }
 
         let user;
         let message = '';
@@ -383,7 +458,6 @@ const handleFirebaseLogin = async (req, res) => {
             errorMessage = error.message;
             statusCode = 400;
         } else if (error.code === '23505') {
-            // Error de duplicidad ya manejado arriba, pero por seguridad
             errorMessage = 'Error de registro de datos.';
             statusCode = 409;
         } else if (error.code === '23503') {
@@ -429,7 +503,7 @@ const getUserProfileByFirebaseUid = async (req, res) => {
 
         if (!userProfile) {
             securityLogger.warn('Profile not found after authentication', {
-                firebaseUid: firebaseUid.substring(0, 8) + '...', // Log parcial por seguridad
+                firebaseUid: firebaseUid.substring(0, 8) + '...',
                 ip: req.ip
             });
             return res.status(404).json({ 
