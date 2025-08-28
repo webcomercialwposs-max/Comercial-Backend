@@ -1,4 +1,4 @@
-// controllers/authController.js - VERSIÓN SECURIZADA
+// controllers/authController.js - VERSIÓN SECUREZADA Y CORREGIDA
 
 const admin = require('firebase-admin');
 const { pool } = require('../db/db.js');
@@ -192,7 +192,8 @@ const handleFirebaseLogin = async (req, res) => {
         }
 
         // 5. Validar y sanitizar email
-        const validatedEmail = validateEmailQuery(email);
+        // ✅ CORRECCIÓN: Llamar a la función del objeto 'sanitizeAndValidate'
+        const validatedEmail = sanitizeAndValidate.validateEmailQuery(email); 
         
         // 6. Validar datos adicionales
         const validatedAdditionalData = validateAndSanitizeAdditionalData(req.body);
