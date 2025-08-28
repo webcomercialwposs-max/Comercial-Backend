@@ -83,7 +83,7 @@ const secureUpsertUserProfile = async (client, userId, validatedData) => {
 };
 
 /**
- * Función para validar y sanitizar datos de entrada de forma segura (VERSIÓN MEJORADA)
+ * ✅ FUNCIÓN CORREGIDA: Validar y sanitizar datos de entrada de forma segura
  */
 const validateAndSanitizeAdditionalData = (rawData) => {
     if (!rawData || typeof rawData !== 'object') {
@@ -94,95 +94,159 @@ const validateAndSanitizeAdditionalData = (rawData) => {
     const validationErrors = [];
 
     try {
-        // ✅ Validar solo los campos presentes y no vacíos
-        if (rawData.first_name !== undefined && rawData.first_name !== null && rawData.first_name !== '') {
+        // ✅ Helper para verificar si un valor es válido para procesar (no null, undefined o string vacío)
+        const isValidNonEmptyValue = (value) => {
+            return value !== undefined && value !== null && value !== '';
+        };
+
+        // ✅ Helper para verificar si un valor está presente (incluye null explícito)
+        const isValuePresent = (value) => {
+            return value !== undefined;
+        };
+
+        // 🔍 Log de debug para diagnóstico
+        securityLogger.info('Validating additional data', {
+            receivedKeys: Object.keys(rawData),
+            values: Object.entries(rawData).reduce((acc, [key, value]) => {
+                acc[key] = value === null ? 'NULL' : (typeof value === 'string' ? `"${value}"` : value);
+                return acc;
+            }, {})
+        });
+
+        // ✅ Validar nombre (solo si tiene valor no vacío)
+        if (isValidNonEmptyValue(rawData.first_name)) {
             try {
                 validatedData.first_name = sanitizeAndValidate.validateName(
                     rawData.first_name, 'Nombre'
                 );
             } catch (error) {
-                validationErrors.push(error.message);
+                validationErrors.push(`Nombre: ${error.message}`);
             }
         }
         
-        if (rawData.last_name !== undefined && rawData.last_name !== null && rawData.last_name !== '') {
+        // ✅ Validar apellido (solo si tiene valor no vacío)
+        if (isValidNonEmptyValue(rawData.last_name)) {
             try {
                 validatedData.last_name = sanitizeAndValidate.validateName(
                     rawData.last_name, 'Apellido'
                 );
             } catch (error) {
-                validationErrors.push(error.message);
+                validationErrors.push(`Apellido: ${error.message}`);
             }
         }
         
-        if (rawData.phone !== undefined && rawData.phone !== null && rawData.phone !== '') {
+        // ✅ Validar teléfono (solo si tiene valor no vacío)
+        if (isValidNonEmptyValue(rawData.phone)) {
             try {
                 validatedData.phone = sanitizeAndValidate.validatePhone(rawData.phone);
             } catch (error) {
-                validationErrors.push(error.message);
+                validationErrors.push(`Teléfono: ${error.message}`);
             }
         }
         
-        if (rawData.city !== undefined && rawData.city !== null && rawData.city !== '') {
+        // ✅ Validar ciudad (solo si tiene valor no vacío)
+        if (isValidNonEmptyValue(rawData.city)) {
             try {
                 validatedData.city = sanitizeAndValidate.validateCity(rawData.city);
             } catch (error) {
-                validationErrors.push(error.message);
+                validationErrors.push(`Ciudad: ${error.message}`);
             }
         }
         
-        if (rawData.profile_picture_url !== undefined && rawData.profile_picture_url !== null && rawData.profile_picture_url !== '') {
-            try {
-                validatedData.profile_picture_url = sanitizeAndValidate.validateProfilePictureUrl(
-                    rawData.profile_picture_url
-                );
-            } catch (error) {
-                validationErrors.push(error.message);
+        // ✅ CORRECCIÓN PRINCIPAL: Manejo especial para profile_picture_url
+        if (isValuePresent(rawData.profile_picture_url)) {
+            if (rawData.profile_picture_url === null || rawData.profile_picture_url === '') {
+                // ✅ Permitir explícitamente null/empty para eliminar foto de perfil
+                validatedData.profile_picture_url = null;
+                securityLogger.info('Profile picture URL set to null (removal)');
+            } else if (typeof rawData.profile_picture_url === 'string') {
+                try {
+                    // ✅ Solo validar si es una URL válida
+                    validatedData.profile_picture_url = sanitizeAndValidate.validateProfilePictureUrl(
+                        rawData.profile_picture_url
+                    );
+                    securityLogger.info('Profile picture URL validated successfully');
+                } catch (error) {
+                    validationErrors.push(`URL de foto de perfil: ${error.message}`);
+                }
+            } else {
+                validationErrors.push('URL de foto de perfil debe ser una cadena de texto o null');
             }
         }
 
-        // ✅ Campos adicionales que podrían venir del frontend
-        if (rawData.requested_role_name !== undefined && rawData.requested_role_name !== null && rawData.requested_role_name !== '') {
+        // ✅ Validar rol solicitado (solo si tiene valor no vacío)
+        if (isValidNonEmptyValue(rawData.requested_role_name)) {
             try {
-                // Usar validateText si no existe validateRoleName
-                validatedData.requested_role_name = sanitizeAndValidate.validateText(
-                    rawData.requested_role_name, 'Rol solicitado'
-                );
+                // Usar validateText si no existe validateRoleName específico
+                if (sanitizeAndValidate.validateRoleName) {
+                    validatedData.requested_role_name = sanitizeAndValidate.validateRoleName(
+                        rawData.requested_role_name
+                    );
+                } else {
+                    validatedData.requested_role_name = sanitizeAndValidate.validateText(
+                        rawData.requested_role_name, 'Rol solicitado'
+                    );
+                }
             } catch (error) {
-                validationErrors.push(error.message);
+                validationErrors.push(`Rol solicitado: ${error.message}`);
             }
         }
 
-        if (rawData.isNewUser !== undefined && rawData.isNewUser !== null) {
-            // Validar que isNewUser sea booleano
+        // ✅ Validar isNewUser (campo booleano)
+        if (isValuePresent(rawData.isNewUser)) {
             if (typeof rawData.isNewUser === 'boolean') {
                 validatedData.isNewUser = rawData.isNewUser;
             } else if (typeof rawData.isNewUser === 'string') {
-                validatedData.isNewUser = rawData.isNewUser.toLowerCase() === 'true';
+                const lowerValue = rawData.isNewUser.toLowerCase();
+                if (lowerValue === 'true' || lowerValue === 'false') {
+                    validatedData.isNewUser = lowerValue === 'true';
+                } else {
+                    validationErrors.push('isNewUser debe ser true o false');
+                }
+            } else if (typeof rawData.isNewUser === 'number') {
+                validatedData.isNewUser = rawData.isNewUser === 1;
             } else {
-                validationErrors.push('isNewUser debe ser true o false');
+                validationErrors.push('isNewUser debe ser un valor booleano válido');
             }
         }
 
-        // ✅ Si hay errores de validación, lanzar excepción
+        // ✅ Si hay errores de validación, lanzar excepción detallada
         if (validationErrors.length > 0) {
-            throw new Error(`Errores de validación: ${validationErrors.join(', ')}`);
+            const errorMessage = `Errores de validación: ${validationErrors.join('; ')}`;
+            securityLogger.warn('Validation errors found', {
+                errors: validationErrors,
+                rawDataKeys: Object.keys(rawData)
+            });
+            throw new Error(errorMessage);
         }
+
+        // ✅ Log de datos validados exitosamente
+        securityLogger.info('Data validation successful', {
+            validatedKeys: Object.keys(validatedData),
+            validatedCount: Object.keys(validatedData).length
+        });
 
         return validatedData;
 
     } catch (error) {
+        // ✅ Log detallado del error de validación
         securityLogger.warn('Data validation failed', {
             error: error.message,
-            rawDataKeys: Object.keys(rawData),
-            validationErrors
+            rawDataKeys: rawData ? Object.keys(rawData) : [],
+            rawDataTypes: rawData ? Object.entries(rawData).reduce((acc, [key, value]) => {
+                acc[key] = value === null ? 'null' : typeof value;
+                return acc;
+            }, {}) : {},
+            validationErrors: validationErrors.length > 0 ? validationErrors : 'No specific validation errors'
         });
+        
+        // ✅ Re-lanzar con mensaje más descriptivo
         throw new Error(`Datos inválidos: ${error.message}`);
     }
 };
 
 /**
- * Manejo seguro del login/registro de Firebase (VERSIÓN CORREGIDA)
+ * ✅ FUNCIÓN MEJORADA: Manejo seguro del login/registro de Firebase
  */
 const handleFirebaseLogin = async (req, res) => {
     const startTime = Date.now();
@@ -191,12 +255,22 @@ const handleFirebaseLogin = async (req, res) => {
     let firebaseUid = null;
 
     try {
-        // 1. Validación inicial del token
+        // 🔍 Log de entrada para debugging
+        securityLogger.info('🔄 Processing Firebase login request', {
+            ip: req.ip,
+            userAgent: req.get('User-Agent'),
+            hasBody: !!req.body,
+            bodyKeys: req.body ? Object.keys(req.body) : [],
+            contentType: req.get('Content-Type')
+        });
+
+        // 1. ✅ Validación inicial del token
         const authHeader = req.headers.authorization;
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
             securityLogger.warn('Authentication attempt without proper token', {
                 ip: req.ip,
-                userAgent: req.get('User-Agent')
+                userAgent: req.get('User-Agent'),
+                hasAuthHeader: !!authHeader
             });
             return res.status(401).json({ 
                 message: 'Acceso denegado. Token no proporcionado o inválido.' 
@@ -207,27 +281,68 @@ const handleFirebaseLogin = async (req, res) => {
         
         // Validación básica del token
         if (!idToken || idToken.length < 100) {
+            securityLogger.warn('Invalid token format', {
+                ip: req.ip,
+                tokenLength: idToken ? idToken.length : 0
+            });
             return res.status(401).json({ 
                 message: 'Token de autenticación inválido.' 
             });
         }
 
-        // 2. Conectar a BD y comenzar transacción
-        client = await pool.connect();
-        await client.query('BEGIN');
+        // 2. ✅ Conectar a BD y comenzar transacción
+        try {
+            client = await pool.connect();
+            await client.query('BEGIN');
+            securityLogger.info('Database connection established and transaction started');
+        } catch (dbError) {
+            securityLogger.error('Database connection failed', {
+                error: dbError.message,
+                code: dbError.code
+            });
+            return res.status(503).json({
+                message: 'Servicio temporalmente no disponible. Intenta nuevamente.'
+            });
+        }
         
-        // 3. Verificar token con Firebase (con timeout)
-        const tokenVerificationPromise = admin.auth().verifyIdToken(idToken);
-        const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Token verification timeout')), 5000) // Reducido a 5s
-        );
-        
-        const decodedToken = await Promise.race([tokenVerificationPromise, timeoutPromise]);
+        // 3. ✅ Verificar token con Firebase (con timeout mejorado)
+        let decodedToken;
+        try {
+            const tokenVerificationPromise = admin.auth().verifyIdToken(idToken);
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Token verification timeout')), 5000)
+            );
+            
+            decodedToken = await Promise.race([tokenVerificationPromise, timeoutPromise]);
+            securityLogger.info('Firebase token verified successfully');
+            
+        } catch (tokenError) {
+            await client.query('ROLLBACK');
+            securityLogger.error('Firebase token verification failed', {
+                error: tokenError.message,
+                code: tokenError.code,
+                ip: req.ip
+            });
+            
+            let errorMessage = 'Token de autenticación inválido.';
+            let statusCode = 401;
+            
+            if (tokenError.message === 'Token verification timeout') {
+                errorMessage = 'Tiempo de verificación agotado. Intenta nuevamente.';
+                statusCode = 408;
+            } else if (tokenError.code === 'auth/id-token-expired') {
+                errorMessage = 'El token de sesión ha expirado. Por favor, vuelve a iniciar sesión.';
+            } else if (tokenError.code === 'auth/argument-error' || tokenError.code === 'auth/invalid-id-token') {
+                errorMessage = 'Token de sesión inválido.';
+            }
+            
+            return res.status(statusCode).json({ message: errorMessage });
+        }
         
         firebaseUid = decodedToken.uid;
         email = decodedToken.email;
 
-        // 4. Validaciones de token decodificado
+        // 4. ✅ Validaciones de token decodificado
         if (!firebaseUid || !email) {
             await client.query('ROLLBACK');
             securityLogger.warn('Invalid Firebase token data', {
@@ -240,15 +355,28 @@ const handleFirebaseLogin = async (req, res) => {
             });
         }
 
-        // 5. Validar y sanitizar email
-        const validatedEmail = email.toLowerCase().trim(); // ✅ Simple sanitización
+        // 5. ✅ Validar y sanitizar email
+        const validatedEmail = email.toLowerCase().trim();
         
+        // Validación básica de email
+        if (!validatedEmail.includes('@') || validatedEmail.length < 5) {
+            await client.query('ROLLBACK');
+            securityLogger.warn('Invalid email format from Firebase', {
+                emailLength: validatedEmail.length,
+                hasAt: validatedEmail.includes('@'),
+                ip: req.ip
+            });
+            return res.status(400).json({ 
+                message: 'Formato de email inválido.' 
+            });
+        }
+
         // 6. ✅ CORRECCIÓN PRINCIPAL: Manejo robusto de datos adicionales
         let validatedAdditionalData = {};
         try {
             // Solo procesar datos adicionales si existen y no están vacíos
             if (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0) {
-                securityLogger.info('Datos adicionales recibidos', {
+                securityLogger.info('Processing additional data', {
                     keys: Object.keys(req.body),
                     hasNewUser: req.body.isNewUser !== undefined,
                     ip: req.ip
@@ -256,10 +384,13 @@ const handleFirebaseLogin = async (req, res) => {
                 
                 validatedAdditionalData = validateAndSanitizeAdditionalData(req.body);
                 
-                securityLogger.info('Datos adicionales validados', {
+                securityLogger.info('Additional data validated successfully', {
                     keys: Object.keys(validatedAdditionalData),
+                    count: Object.keys(validatedAdditionalData).length,
                     ip: req.ip
                 });
+            } else {
+                securityLogger.info('No additional data to process');
             }
         } catch (validationError) {
             await client.query('ROLLBACK');
@@ -277,17 +408,17 @@ const handleFirebaseLogin = async (req, res) => {
         let message = '';
         let status = 200;
 
-        // 7. Buscar usuario por firebase_uid
+        // 7. ✅ Buscar usuario por firebase_uid
         let userResult = await client.query(PREPARED_QUERIES.getUserByFirebaseUid, [firebaseUid]);
         user = userResult.rows[0];
 
         if (!user) {
-            // 8. Buscar por email si no se encontró por UID
+            // 8. ✅ Buscar por email si no se encontró por UID
             userResult = await client.query(PREPARED_QUERIES.getUserByEmail, [validatedEmail]);
             user = userResult.rows[0];
 
             if (user) {
-                // 9. Usuario existe por email, actualizar firebase_uid
+                // 9. ✅ Usuario existe por email, actualizar firebase_uid
                 if (!user.firebase_uid || user.firebase_uid !== firebaseUid) {
                     await client.query(PREPARED_QUERIES.updateFirebaseUid, [firebaseUid, user.user_id]);
                     
@@ -297,6 +428,11 @@ const handleFirebaseLogin = async (req, res) => {
                     userResult = await client.query(PREPARED_QUERIES.getUserById, [user.user_id]);
                     user = userResult.rows[0];
                     message = 'Usuario existente actualizado y sesión iniciada.';
+                    
+                    securityLogger.info('Existing user updated with Firebase UID', {
+                        userId: user.user_id,
+                        email: validatedEmail
+                    });
                 } else {
                     await secureUpsertUserProfile(client, user.user_id, validatedAdditionalData);
                     
@@ -307,7 +443,7 @@ const handleFirebaseLogin = async (req, res) => {
                     message = 'Sesión iniciada exitosamente.';
                 }
             } else {
-                // 10. Crear nuevo usuario
+                // 10. ✅ Crear nuevo usuario
                 const defaultRoleResult = await client.query(PREPARED_QUERIES.getDefaultRole);
                 const defaultRoleId = defaultRoleResult.rows[0]?.role_id;
 
@@ -339,7 +475,7 @@ const handleFirebaseLogin = async (req, res) => {
                     message = 'Usuario registrado y sesión iniciada exitosamente.';
                     status = 201;
                     
-                    securityLogger.info('New user created', {
+                    securityLogger.info('New user created successfully', {
                         userId: newUserId,
                         email: validatedEmail,
                         ip: req.ip
@@ -348,6 +484,7 @@ const handleFirebaseLogin = async (req, res) => {
                 } catch (insertError) {
                     if (insertError.code === '23505') {
                         // Race condition - el usuario ya fue creado
+                        securityLogger.info('Race condition detected, user already exists');
                         userResult = await client.query(PREPARED_QUERIES.getUserByEmail, [validatedEmail]);
                         user = userResult.rows[0];
                         
@@ -362,7 +499,7 @@ const handleFirebaseLogin = async (req, res) => {
                 }
             }
         } else {
-            // 11. Usuario encontrado por firebase_uid
+            // 11. ✅ Usuario encontrado por firebase_uid
             await secureUpsertUserProfile(client, user.user_id, validatedAdditionalData);
             
             if (Object.keys(validatedAdditionalData).length > 0) {
@@ -372,7 +509,7 @@ const handleFirebaseLogin = async (req, res) => {
             message = 'Sesión iniciada exitosamente.';
         }
 
-        // 12. Verificar si el usuario está bloqueado
+        // 12. ✅ Verificar si el usuario está bloqueado
         if (user.is_blocked) {
             await client.query('ROLLBACK');
             securityLogger.warn('Blocked user attempted login', {
@@ -385,12 +522,12 @@ const handleFirebaseLogin = async (req, res) => {
             });
         }
 
-        // 13. Confirmar transacción
+        // 13. ✅ Confirmar transacción
         await client.query('COMMIT');
 
         const processingTime = Date.now() - startTime;
         
-        securityLogger.info('Successful authentication', {
+        securityLogger.info('✅ Authentication successful', {
             userId: user.user_id,
             email: user.email,
             status,
@@ -398,7 +535,7 @@ const handleFirebaseLogin = async (req, res) => {
             ip: req.ip
         });
 
-        // 14. Respuesta exitosa (sin datos sensibles)
+        // 14. ✅ Respuesta exitosa (sin datos sensibles)
         res.status(status).json({
             message: message,
             user: {
@@ -416,7 +553,7 @@ const handleFirebaseLogin = async (req, res) => {
         });
 
     } catch (error) {
-        // Rollback en caso de error
+        // ✅ Rollback en caso de error
         if (client) {
             try {
                 await client.query('ROLLBACK');
@@ -430,10 +567,11 @@ const handleFirebaseLogin = async (req, res) => {
         
         const processingTime = Date.now() - startTime;
         
-        // Log detallado del error (sin datos sensibles)
-        securityLogger.error('Authentication error', {
+        // ✅ Log detallado del error (sin datos sensibles)
+        securityLogger.error('❌ Authentication error', {
             error: error.message,
             code: error.code,
+            stack: error.stack?.substring(0, 500) + '...', // Stack limitado
             processingTime,
             ip: req.ip,
             userAgent: req.get('User-Agent'),
@@ -444,7 +582,7 @@ const handleFirebaseLogin = async (req, res) => {
         let errorMessage = 'Error al procesar la autenticación.';
         let statusCode = 500;
 
-        // Manejo específico de errores
+        // ✅ Manejo específico de errores mejorado
         if (error.code === 'auth/id-token-expired') {
             errorMessage = 'El token de sesión ha expirado. Por favor, vuelve a iniciar sesión.';
             statusCode = 401;
@@ -458,7 +596,7 @@ const handleFirebaseLogin = async (req, res) => {
             errorMessage = error.message;
             statusCode = 400;
         } else if (error.code === '23505') {
-            errorMessage = 'Error de registro de datos.';
+            errorMessage = 'Error de registro de datos (duplicado).';
             statusCode = 409;
         } else if (error.code === '23503') {
             errorMessage = 'Error de referencia de datos.';
@@ -469,6 +607,9 @@ const handleFirebaseLogin = async (req, res) => {
         } else if (error.message && error.message.includes('Firebase')) {
             errorMessage = 'Error de autenticación Firebase.';
             statusCode = 401;
+        } else if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+            errorMessage = 'Error de conexión del servidor. Intenta nuevamente.';
+            statusCode = 503;
         }
 
         res.status(statusCode).json({ message: errorMessage });
@@ -480,7 +621,7 @@ const handleFirebaseLogin = async (req, res) => {
 };
 
 /**
- * Obtener perfil de usuario por Firebase UID (versión segura)
+ * ✅ Obtener perfil de usuario por Firebase UID (versión segura)
  */
 const getUserProfileByFirebaseUid = async (req, res) => {
     let client;
@@ -553,7 +694,7 @@ const getUserProfileByFirebaseUid = async (req, res) => {
 };
 
 /**
- * Actualizar perfil de usuario (versión segura)
+ * ✅ Actualizar perfil de usuario (versión segura)
  */
 const updateUserProfile = async (req, res) => {
     let client;
@@ -568,7 +709,7 @@ const updateUserProfile = async (req, res) => {
             return res.status(401).json({ message: 'Usuario no autenticado.' });
         }
 
-        // Validar datos de entrada
+        // ✅ Validar datos de entrada
         const validatedData = validateAndSanitizeAdditionalData(req.body);
 
         // Verificar que el usuario existe y no está bloqueado
