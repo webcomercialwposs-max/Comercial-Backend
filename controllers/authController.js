@@ -75,6 +75,7 @@ const secureUpsertUserProfile = async (client, userId, validatedData) => {
             validatedData.profile_picture_url || null
         ]);
     } catch (error) {
+        console.error('🔴 ERROR en secureUpsertUserProfile:', error.message, 'Código:', error.code, 'UserID:', userId);
         securityLogger.error('Error in secureUpsertUserProfile', {
             userId,
             error: error.message,
@@ -124,6 +125,7 @@ const validateAndSanitizeAdditionalData = (rawData) => {
 
         return validatedData;
     } catch (error) {
+        console.error('🔴 ERROR en validateAndSanitizeAdditionalData:', error.message);
         securityLogger.warn('Data validation failed', {
             error: error.message,
             rawDataKeys: Object.keys(rawData)
@@ -145,6 +147,7 @@ const handleFirebaseLogin = async (req, res) => {
         // 1. Validación inicial del token
         const authHeader = req.headers.authorization;
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            console.error('🔴 ERROR de autenticación: Token no proporcionado o inválido.');
             securityLogger.warn('Authentication attempt without proper token', {
                 ip: req.ip,
                 userAgent: req.get('User-Agent')
@@ -158,6 +161,7 @@ const handleFirebaseLogin = async (req, res) => {
 
         // Validación básica del token
         if (!idToken || idToken.length < 100) {
+            console.error('🔴 ERROR de autenticación: Token muy corto o vacío.');
             return res.status(401).json({
                 message: 'Token de autenticación inválido.'
             });
@@ -181,6 +185,7 @@ const handleFirebaseLogin = async (req, res) => {
         // 4. Validaciones de token decodificado
         if (!firebaseUid || !email) {
             await client.query('ROLLBACK');
+            console.error('🔴 ERROR de autenticación: UID o email no encontrados en el token decodificado.');
             securityLogger.warn('Invalid Firebase token data', {
                 hasUid: !!firebaseUid,
                 hasEmail: !!email,
@@ -214,16 +219,12 @@ const handleFirebaseLogin = async (req, res) => {
                 // 9. Usuario existe por email, actualizar firebase_uid
                 if (!user.firebase_uid || user.firebase_uid !== firebaseUid) {
                     await client.query(PREPARED_QUERIES.updateFirebaseUid, [firebaseUid, user.user_id]);
-
                     await secureUpsertUserProfile(client, user.user_id, validatedAdditionalData);
-
-                    // Recargar datos actualizados
                     userResult = await client.query(PREPARED_QUERIES.getUserById, [user.user_id]);
                     user = userResult.rows[0];
                     message = 'Usuario existente actualizado y sesión iniciada.';
                 } else {
                     await secureUpsertUserProfile(client, user.user_id, validatedAdditionalData);
-
                     if (Object.keys(validatedAdditionalData).length > 0) {
                         userResult = await client.query(PREPARED_QUERIES.getUserById, [user.user_id]);
                         user = userResult.rows[0];
@@ -237,6 +238,7 @@ const handleFirebaseLogin = async (req, res) => {
 
                 if (!defaultRoleId) {
                     await client.query('ROLLBACK');
+                    console.error("🔴 ERROR de configuración: Rol 'Usuario' no encontrado.");
                     securityLogger.error("Default role 'Usuario' not found", {
                         timestamp: new Date().toISOString()
                     });
@@ -245,36 +247,27 @@ const handleFirebaseLogin = async (req, res) => {
                     });
                 }
 
-                // Insertar usuario con manejo de concurrencia
                 try {
                     const newUserResult = await client.query(PREPARED_QUERIES.insertUser, [
                         firebaseUid,
                         validatedEmail,
                         defaultRoleId
                     ]);
-
                     const newUserId = newUserResult.rows[0].user_id;
-
                     await secureUpsertUserProfile(client, newUserId, validatedAdditionalData);
-
                     userResult = await client.query(PREPARED_QUERIES.getUserById, [newUserId]);
                     user = userResult.rows[0];
-
                     message = 'Usuario registrado y sesión iniciada exitosamente.';
                     status = 201;
-
                     securityLogger.info('New user created', {
                         userId: newUserId,
                         email: validatedEmail,
                         ip: req.ip
                     });
-
                 } catch (insertError) {
                     if (insertError.code === '23505') {
-                        // Race condition - el usuario ya fue creado
                         userResult = await client.query(PREPARED_QUERIES.getUserByEmail, [validatedEmail]);
                         user = userResult.rows[0];
-
                         if (user) {
                             message = 'Ya existía una cuenta, se ha iniciado sesión automáticamente.';
                         } else {
@@ -288,7 +281,6 @@ const handleFirebaseLogin = async (req, res) => {
         } else {
             // 11. Usuario encontrado por firebase_uid
             await secureUpsertUserProfile(client, user.user_id, validatedAdditionalData);
-
             if (Object.keys(validatedAdditionalData).length > 0) {
                 userResult = await client.query(PREPARED_QUERIES.getUserById, [user.user_id]);
                 user = userResult.rows[0];
@@ -299,6 +291,7 @@ const handleFirebaseLogin = async (req, res) => {
         // 12. Verificar si el usuario está bloqueado
         if (user.is_blocked) {
             await client.query('ROLLBACK');
+            console.warn('🟡 ADVERTENCIA: Usuario bloqueado intentó iniciar sesión.', 'UserID:', user.user_id, 'Email:', user.email);
             securityLogger.warn('Blocked user attempted login', {
                 userId: user.user_id,
                 email: user.email,
@@ -311,9 +304,7 @@ const handleFirebaseLogin = async (req, res) => {
 
         // 13. Confirmar transacción
         await client.query('COMMIT');
-
         const processingTime = Date.now() - startTime;
-
         securityLogger.info('Successful authentication', {
             userId: user.user_id,
             email: user.email,
@@ -340,24 +331,19 @@ const handleFirebaseLogin = async (req, res) => {
         });
 
     } catch (error) {
-        // Rollback en caso de error
         if (client) {
             try {
                 await client.query('ROLLBACK');
             } catch (rollbackError) {
+                console.error('🔴 ERROR al intentar ROLLBACK:', rollbackError.message);
                 securityLogger.error('Rollback error', {
                     originalError: error.message,
                     rollbackError: rollbackError.message
                 });
             }
         }
-
         const processingTime = Date.now() - startTime;
-
-        // **AQUÍ ESTÁ EL LOG AÑADIDO**
         console.error('🔴 ERROR DE AUTENTICACIÓN:', error.message, 'Código:', error.code);
-
-        // Log detallado del error (sin datos sensibles)
         securityLogger.error('Authentication error', {
             error: error.message,
             code: error.code,
@@ -371,7 +357,6 @@ const handleFirebaseLogin = async (req, res) => {
         let errorMessage = 'Error al procesar la autenticación.';
         let statusCode = 500;
 
-        // Manejo específico de errores
         if (error.code === 'auth/id-token-expired') {
             errorMessage = 'El token de sesión ha expirado. Por favor, vuelve a iniciar sesión.';
             statusCode = 401;
@@ -385,7 +370,6 @@ const handleFirebaseLogin = async (req, res) => {
             errorMessage = error.message;
             statusCode = 400;
         } else if (error.code === '23505') {
-            // Error de duplicidad ya manejado arriba, pero por seguridad
             errorMessage = 'Error de registro de datos.';
             statusCode = 409;
         } else if (error.code === '23503') {
@@ -419,6 +403,7 @@ const getUserProfileByFirebaseUid = async (req, res) => {
         const firebaseUid = req.user?.firebase_uid;
 
         if (!firebaseUid) {
+            console.error('🔴 ERROR en getUserProfileByFirebaseUid: UID no encontrado en la solicitud.');
             securityLogger.warn('Profile request without Firebase UID', {
                 ip: req.ip,
                 userId: req.user?.userId
@@ -432,6 +417,7 @@ const getUserProfileByFirebaseUid = async (req, res) => {
         const userProfile = userResult.rows[0];
 
         if (!userProfile) {
+            console.error('🔴 ERROR en getUserProfileByFirebaseUid: Perfil no encontrado para el UID.');
             securityLogger.warn('Profile not found after authentication', {
                 firebaseUid: firebaseUid.substring(0, 8) + '...',
                 ip: req.ip
@@ -442,6 +428,7 @@ const getUserProfileByFirebaseUid = async (req, res) => {
         }
 
         if (userProfile.is_blocked) {
+            console.warn('🟡 ADVERTENCIA: Intento de acceso a perfil por usuario bloqueado.', 'UserID:', userProfile.user_id);
             securityLogger.warn('Blocked user attempted profile access', {
                 userId: userProfile.user_id,
                 ip: req.ip
@@ -467,6 +454,7 @@ const getUserProfileByFirebaseUid = async (req, res) => {
             }
         });
     } catch (error) {
+        console.error('🔴 ERROR en getUserProfileByFirebaseUid:', error.message, 'Código:', error.code);
         securityLogger.error('Error in getUserProfileByFirebaseUid', {
             error: error.message,
             ip: req.ip,
@@ -495,13 +483,12 @@ const updateUserProfile = async (req, res) => {
 
         if (!userId) {
             await client.query('ROLLBACK');
+            console.error('🔴 ERROR en updateUserProfile: No se encontró el ID de usuario.');
             return res.status(401).json({ message: 'Usuario no autenticado.' });
         }
 
-        // Validar datos de entrada
         const validatedData = validateAndSanitizeAdditionalData(req.body);
 
-        // Verificar que el usuario existe y no está bloqueado
         const userCheck = await client.query(
             'SELECT user_id, is_blocked FROM users WHERE user_id = $1',
             [userId]
@@ -509,6 +496,7 @@ const updateUserProfile = async (req, res) => {
 
         if (!userCheck.rows[0]) {
             await client.query('ROLLBACK');
+            console.error('🔴 ERROR en updateUserProfile: Intento de actualización de usuario no existente.', 'UserID:', userId);
             securityLogger.warn('Profile update attempt for non-existent user', {
                 userId,
                 ip: req.ip
@@ -518,6 +506,7 @@ const updateUserProfile = async (req, res) => {
 
         if (userCheck.rows[0].is_blocked) {
             await client.query('ROLLBACK');
+            console.warn('🟡 ADVERTENCIA: Usuario bloqueado intentó actualizar perfil.', 'UserID:', userId);
             securityLogger.warn('Blocked user attempted profile update', {
                 userId,
                 ip: req.ip
@@ -525,10 +514,8 @@ const updateUserProfile = async (req, res) => {
             return res.status(403).json({ message: 'Cuenta bloqueada.' });
         }
 
-        // Actualizar perfil con datos validados
         await secureUpsertUserProfile(client, userId, validatedData);
 
-        // Obtener datos actualizados
         const updatedUser = await client.query(PREPARED_QUERIES.getUserById, [userId]);
 
         await client.query('COMMIT');
@@ -560,13 +547,14 @@ const updateUserProfile = async (req, res) => {
             try {
                 await client.query('ROLLBACK');
             } catch (rollbackError) {
+                console.error('🔴 ERROR al intentar ROLLBACK en updateUserProfile:', rollbackError.message);
                 securityLogger.error('Rollback error in updateUserProfile', {
                     originalError: error.message,
                     rollbackError: rollbackError.message
                 });
             }
         }
-
+        console.error('🔴 ERROR en updateUserProfile:', error.message, 'Código:', error.code);
         securityLogger.error('Error in updateUserProfile', {
             error: error.message,
             userId: req.user?.userId,
