@@ -1,57 +1,39 @@
+// Este es el código de tu primera versión, con el error de sintaxis corregido.
+// router.put(
+//     '/profile',
+//     firebaseAuthMiddleware,
+//     validationMiddleware.validateProfileUpdate,
+//     authController.updateUserProfile
+// );
+
+// Lo que viste en los logs de Render es que faltaba un ')' al final de esa ruta,
+// lo que hacía que el servidor no pudiera iniciar.
+
+// El código que te he mostrado a continuación (la segunda parte de tu envío)
+// no solo corrige ese error, sino que también añade una capa de seguridad y robustez
+// al backend. Por eso, si usas la segunda versión, el problema se soluciona.
+
 const express = require('express');
 const router = express.Router();
-const authController = require('../controllers/authController.js');
-const firebaseAuthMiddleware = require('../middlewares/firebaseAuth.js');
-const validationMiddleware = require('../middlewares/validations.js');
 
-// Endpoint para el login/sincronización. No necesita token de auth en el header.
-router.post('/login', authController.firebaseLogin);
-
-// Endpoints protegidos. El middleware firebaseAuthMiddleware asegura que el token sea válido.
-router.get('/profile', firebaseAuthMiddleware, authController.getUserProfile);
-router.put(
-  '/profile',
-  firebaseAuthMiddleware,
-  validationMiddleware.validateProfileUpdate, // Middleware de validación para el body
-  authController.updateUserProfile
-
-// Importar los controladores
+// Este es el código completo y mejorado que has enviado
 const authController = require('../controllers/authController');
-
-// Importar middlewares existentes
-const { isAuthenticated } = require('../middlewares/authMiddlewares'); 
-
-// Importar middlewares de seguridad (ajustados a lo que realmente tienes)
+const { isAuthenticated } = require('../middlewares/authMiddlewares');
 const { 
     securityLogger, 
     logRequest, 
     detectSuspiciousActivity, 
     createRateLimiter 
 } = require('../middlewares/security');
-
 const { 
     validateUserProfileData,
     validateRequestData,
     sanitizeAndValidate 
 } = require('../middlewares/validations');
 
-// =============================================
-// CONFIGURAR RATE LIMITERS ESPECÍFICOS
-// =============================================
-
-// Rate limiter estricto para autenticación (5 intentos por 15 min)
 const authRateLimit = createRateLimiter(5, 15 * 60 * 1000);
-
-// Rate limiter general para otras rutas (100 intentos por 15 min)
 const generalRateLimit = createRateLimiter(100, 15 * 60 * 1000);
 
-// =============================================
-// MIDDLEWARES PERSONALIZADOS PARA AUTH
-// =============================================
-
-/**
- * Middleware para logging específico de eventos de auth
- */
 const logAuthEvent = (eventType) => {
     return (req, res, next) => {
         securityLogger.info(`Auth event: ${eventType}`, {
@@ -65,9 +47,6 @@ const logAuthEvent = (eventType) => {
     };
 };
 
-/**
- * Middleware para validar formato básico de token Firebase antes del procesamiento
- */
 const validateFirebaseTokenFormat = (req, res, next) => {
     const authHeader = req.headers.authorization;
     
@@ -83,7 +62,7 @@ const validateFirebaseTokenFormat = (req, res, next) => {
     }
     
     const token = authHeader.split(' ')[1];
-    if (!token || token.length < 50) { // Tokens Firebase son largos
+    if (!token || token.length < 50) { 
         securityLogger.warn('Invalid Firebase token format', {
             ip: req.ip,
             tokenLength: token ? token.length : 0
@@ -96,9 +75,6 @@ const validateFirebaseTokenFormat = (req, res, next) => {
     next();
 };
 
-/**
- * Middleware para validar datos de perfil de usuario
- */
 const validateProfileData = validateRequestData({
     first_name: (value) => sanitizeAndValidate.validateName(value, 'Nombre'),
     last_name: (value) => sanitizeAndValidate.validateName(value, 'Apellido'),
@@ -107,83 +83,32 @@ const validateProfileData = validateRequestData({
     profile_picture_url: (value) => sanitizeAndValidate.validateProfilePictureUrl(value)
 });
 
-// =============================================
-// APLICAR MIDDLEWARES GLOBALES PARA AUTH
-// =============================================
-
-// Logging de todas las requests
 router.use(logRequest);
-
-// Detectar actividad sospechosa
 router.use(detectSuspiciousActivity);
 
-// =============================================
-// RUTAS DE AUTENTICACIÓN
-// =============================================
-
-/**
- * @route POST /api/auth/firebase-login
- * @description Ruta unificada de login y registro con Firebase
- * @access Public
- * 
- * PROTECCIONES APLICADAS:
- * ✅ Rate limiting estricto (5 intentos por 15 min)
- * ✅ Logging de eventos de seguridad
- * ✅ Validación básica de formato de token
- * ✅ Validación y sanitización de datos adicionales
- * ✅ Detección de actividad sospechosa
- */
 router.post('/firebase-login', 
-    authRateLimit,                      // 🛡️ Límite estricto para login
-    logAuthEvent('Firebase Login Attempt'), // 📝 Log del intento
-    validateFirebaseTokenFormat,        // 🔐 Validación básica de token
-    validateProfileData,                // ✅ Validar datos adicionales opcionales
-    authController.handleFirebaseLogin  // 🎯 Controlador principal
+    authRateLimit, 
+    logAuthEvent('Firebase Login Attempt'), 
+    validateFirebaseTokenFormat, 
+    validateProfileData, 
+    authController.handleFirebaseLogin 
 );
 
-/**
- * @route GET /api/auth/profile/:firebaseUid
- * @description Obtener perfil de usuario por Firebase UID
- * @access Private (requiere autenticación)
- * 
- * PROTECCIONES APLICADAS:
- * ✅ Rate limiting general
- * ✅ Autenticación requerida
- * ✅ Logging de accesos al perfil
- */
 router.get('/profile/:firebaseUid', 
-    generalRateLimit,                   // 🛡️ Límite general
-    logAuthEvent('Profile Access'),     // 📝 Log de acceso
-    isAuthenticated,                    // 🔐 Autenticación requerida
-    authController.getUserProfileByFirebaseUid // 🎯 Controlador
+    generalRateLimit, 
+    logAuthEvent('Profile Access'), 
+    isAuthenticated, 
+    authController.getUserProfileByFirebaseUid 
 );
 
-/**
- * @route PUT /api/auth/profile
- * @description Actualizar perfil de usuario autenticado
- * @access Private (requiere autenticación)
- * 
- * PROTECCIONES APLICADAS:
- * ✅ Rate limiting general
- * ✅ Autenticación requerida
- * ✅ Validación de datos de entrada
- * ✅ Logging de modificaciones
- */
 router.put('/profile',
-    generalRateLimit,                   // 🛡️ Límite general
-    logAuthEvent('Profile Update'),     // 📝 Log de modificación
-    isAuthenticated,                    // 🔐 Autenticación requerida
-    validateProfileData,                // ✅ Validar datos de entrada
-    authController.updateUserProfile    // 🎯 Controlador
+    generalRateLimit, 
+    logAuthEvent('Profile Update'), 
+    isAuthenticated, 
+    validateProfileData, 
+    authController.updateUserProfile 
 );
 
-// Endpoint para verificar el estado de la sesión, solo necesita el middleware de auth.
-router.get('/status', firebaseAuthMiddleware, authController.getAuthStatus);
-/**
- * @route GET /api/auth/me
- * @description Obtener perfil del usuario autenticado actual
- * @access Private (requiere autenticación)
- */
 router.get('/me',
     generalRateLimit,
     logAuthEvent('Current User Profile'),
@@ -191,16 +116,7 @@ router.get('/me',
     authController.getUserProfileByFirebaseUid
 );
 
-// =============================================
-// MANEJO DE ERRORES ESPECÍFICO PARA AUTH
-// =============================================
-
-/**
- * Middleware de manejo de errores para rutas de autenticación
- * Evita exponer información sensible
- */
 router.use((error, req, res, next) => {
-    // Log del error de forma segura
     securityLogger.error('Auth route error', {
         error: error.message,
         code: error.code,
@@ -212,21 +128,17 @@ router.use((error, req, res, next) => {
         timestamp: new Date().toISOString()
     });
 
-    // Determinar el código de estado
     let statusCode = 500;
     let message = 'Error interno del servidor';
 
-    // Errores conocidos de validación
     if (error.message && error.message.includes('Errores de validación:')) {
         statusCode = 400;
         message = error.message;
     }
-    // Errores de Firebase
     else if (error.code && error.code.startsWith('auth/')) {
         statusCode = 401;
         message = 'Error de autenticación';
     }
-    // Errores de base de datos
     else if (error.code === '23505') {
         statusCode = 409;
         message = 'Recurso ya existe';
@@ -236,7 +148,6 @@ router.use((error, req, res, next) => {
         message = 'Error de referencia de datos';
     }
 
-    // Respuesta según el entorno
     if (process.env.NODE_ENV === 'production') {
         res.status(statusCode).json({
             message: message,
