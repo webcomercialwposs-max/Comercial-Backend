@@ -17,11 +17,6 @@ const {
     createRateLimiter
 } = require('../middlewares/security');
 
-// 🔧 Importar la función correcta del controlador para la validación
-const {
-    validateRequestData
-} = require('../middlewares/validations');
-
 // =============================================
 // CONFIGURAR RATE LIMITERS ESPECÍFICOS
 // =============================================
@@ -64,8 +59,8 @@ const validateFirebaseTokenFormat = (req, res, next) => {
             userAgent: req.get('User-Agent'),
             authHeader: authHeader ? 'present' : 'missing'
         });
-        return res.status(401).json({
-            message: 'Formato de autorización inválido.'
+        return res.status(400).json({
+            message: 'Solicitud inválida detectada.'
         });
     }
     
@@ -75,8 +70,8 @@ const validateFirebaseTokenFormat = (req, res, next) => {
             ip: req.ip,
             tokenLength: token ? token.length : 0
         });
-        return res.status(401).json({
-            message: 'Token de autenticación inválido.'
+        return res.status(400).json({
+            message: 'Solicitud inválida detectada.'
         });
     }
     
@@ -84,22 +79,67 @@ const validateFirebaseTokenFormat = (req, res, next) => {
 };
 
 /**
- * 🔧 MIDDLEWARE CORREGIDO: Validar datos de perfil de usuario
+ * Middleware para validar datos de perfil de usuario (CORREGIDO)
  */
 const validateProfileData = (req, res, next) => {
     try {
-        if (req.body && Object.keys(req.body).length > 0) {
-            // ✅ CORREGIDO: Usar la función correcta del controlador
-            const validatedData = authController.validateAndSanitizeAdditionalData(req.body);
-            req.body = validatedData;
+        // Permitir body vacío o undefined
+        if (!req.body || Object.keys(req.body).length === 0) {
+            req.body = {};
+            return next();
         }
+
+        // Usar la función del controlador para validar datos adicionales
+        const validatedData = authController.validateAndSanitizeAdditionalData(req.body);
+        req.body = validatedData;
         next();
     } catch (error) {
+        securityLogger.warn('Profile data validation failed', {
+            error: error.message,
+            ip: req.ip,
+            bodyKeys: req.body ? Object.keys(req.body) : []
+        });
+        
         return res.status(400).json({
-            success: false,
-            message: error.message
+            message: 'Solicitud inválida detectada.'
         });
     }
+};
+
+/**
+ * Middleware básico de validación de request (SIMPLIFICADO)
+ */
+const basicRequestValidation = (req, res, next) => {
+    // Validaciones básicas de seguridad
+    const userAgent = req.get('User-Agent');
+    const contentType = req.get('Content-Type');
+    
+    // Validar User-Agent
+    if (!userAgent || userAgent.length > 1000) {
+        securityLogger.warn('Invalid or suspicious User-Agent', {
+            ip: req.ip,
+            userAgent: userAgent ? userAgent.substring(0, 100) + '...' : 'missing'
+        });
+        return res.status(400).json({
+            message: 'Solicitud inválida detectada.'
+        });
+    }
+    
+    // Para POST/PUT, validar Content-Type si hay body
+    if ((req.method === 'POST' || req.method === 'PUT') && req.body && Object.keys(req.body).length > 0) {
+        if (!contentType || !contentType.includes('application/json')) {
+            securityLogger.warn('Invalid Content-Type for request with body', {
+                ip: req.ip,
+                method: req.method,
+                contentType: contentType || 'missing'
+            });
+            return res.status(400).json({
+                message: 'Solicitud inválida detectada.'
+            });
+        }
+    }
+    
+    next();
 };
 
 // =============================================
@@ -120,7 +160,7 @@ router.use(detectSuspiciousActivity);
 router.post('/firebase-login',
     authRateLimit,
     logAuthEvent('Firebase Login Attempt'),
-    validateRequestData,
+    basicRequestValidation,
     validateFirebaseTokenFormat,
     validateProfileData,
     authController.handleFirebaseLogin
@@ -133,7 +173,7 @@ router.post('/firebase-login',
 router.get('/profile/:firebaseUid',
     generalRateLimit,
     logAuthEvent('Profile Access'),
-    validateRequestData,
+    basicRequestValidation,
     isAuthenticated,
     authController.getUserProfileByFirebaseUid
 );
@@ -145,7 +185,7 @@ router.get('/profile/:firebaseUid',
 router.put('/profile',
     generalRateLimit,
     logAuthEvent('Profile Update'),
-    validateRequestData,
+    basicRequestValidation,
     isAuthenticated,
     validateProfileData,
     authController.updateUserProfile
@@ -158,7 +198,7 @@ router.put('/profile',
 router.get('/me',
     generalRateLimit,
     logAuthEvent('Current User Profile'),
-    validateRequestData,
+    basicRequestValidation,
     isAuthenticated,
     authController.getUserProfileByFirebaseUid
 );
@@ -182,9 +222,9 @@ router.use((error, req, res, next) => {
     let statusCode = 500;
     let message = 'Error interno del servidor';
 
-    if (error.message && error.message.includes('Errores de validación:')) {
+    if (error.message && error.message.includes('Datos inválidos:')) {
         statusCode = 400;
-        message = error.message;
+        message = 'Solicitud inválida detectada.';
     } else if (error.code && error.code.startsWith('auth/')) {
         statusCode = 401;
         message = 'Error de autenticación';
