@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController.js');
 const firebaseAuthMiddleware = require('../middlewares/firebaseAuth.js');
-const validationMiddleware = require('../middlewares/validation.js');
+const validationMiddleware = require('../middlewares/validations.js');
 
 // Endpoint para el login/sincronización. No necesita token de auth en el header.
 router.post('/login', authController.firebaseLogin);
