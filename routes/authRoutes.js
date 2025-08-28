@@ -1,7 +1,19 @@
-// D:\Pagina comercial\Backend\routes\authRoutes.js - VERSIÓN CORREGIDA CON VALIDACIÓN CONDICIONAL
-
 const express = require('express');
 const router = express.Router();
+const authController = require('../controllers/authController.js');
+const firebaseAuthMiddleware = require('../middlewares/firebaseAuth.js');
+const validationMiddleware = require('../middlewares/validations.js');
+
+// Endpoint para el login/sincronización. No necesita token de auth en el header.
+router.post('/login', authController.firebaseLogin);
+
+// Endpoints protegidos. El middleware firebaseAuthMiddleware asegura que el token sea válido.
+router.get('/profile', firebaseAuthMiddleware, authController.getUserProfile);
+router.put(
+  '/profile',
+  firebaseAuthMiddleware,
+  validationMiddleware.validateProfileUpdate, // Middleware de validación para el body
+  authController.updateUserProfile
 
 // Importar los controladores
 const authController = require('../controllers/authController');
@@ -85,7 +97,7 @@ const validateFirebaseTokenFormat = (req, res, next) => {
 };
 
 /**
- * Middleware para validar datos de perfil de usuario (versión estricta)
+ * Middleware para validar datos de perfil de usuario
  */
 const validateProfileData = validateRequestData({
     first_name: (value) => sanitizeAndValidate.validateName(value, 'Nombre'),
@@ -94,63 +106,6 @@ const validateProfileData = validateRequestData({
     city: (value) => sanitizeAndValidate.validateCity(value),
     profile_picture_url: (value) => sanitizeAndValidate.validateProfilePictureUrl(value)
 });
-
-/**
- * Middleware para validación condicional de datos de perfil
- * Detecta automáticamente el tipo de login y aplica validación según corresponda:
- * - OAuth (Google/Microsoft): req.body vacío → no validar
- * - Registro manual: req.body con first_name/last_name → validar todo
- */
-const validateConditionalProfileData = (req, res, next) => {
-    try {
-        // Registro del tipo de request para debugging
-        securityLogger.info('Profile data validation check', {
-            hasBody: !!req.body,
-            bodyKeys: req.body ? Object.keys(req.body) : [],
-            bodySize: req.body ? Object.keys(req.body).length : 0,
-            ip: req.ip
-        });
-
-        // Caso 1: OAuth (Google/Microsoft/Anonymous) - body vacío o sin datos de perfil
-        if (!req.body || Object.keys(req.body).length === 0) {
-            securityLogger.info('OAuth login detected - skipping profile validation', {
-                ip: req.ip
-            });
-            return next();
-        }
-        
-        // Caso 2: Registro manual - detectar por presencia de campos de perfil
-        const hasProfileData = req.body.first_name || req.body.last_name || 
-                              req.body.phone || req.body.city;
-        
-        if (hasProfileData) {
-            securityLogger.info('Manual registration detected - applying full validation', {
-                ip: req.ip,
-                hasFirstName: !!req.body.first_name,
-                hasLastName: !!req.body.last_name,
-                hasPhone: !!req.body.phone,
-                hasCity: !!req.body.city
-            });
-            return validateProfileData(req, res, next);
-        }
-        
-        // Caso 3: Body con datos no relacionados con perfil (casos edge)
-        securityLogger.info('Unknown request type - skipping profile validation', {
-            ip: req.ip,
-            bodyKeys: Object.keys(req.body)
-        });
-        return next();
-        
-    } catch (error) {
-        securityLogger.error('Error in conditional profile validation', {
-            error: error.message,
-            ip: req.ip
-        });
-        return res.status(500).json({
-            message: 'Error interno en validación de datos'
-        });
-    }
-};
 
 // =============================================
 // APLICAR MIDDLEWARES GLOBALES PARA AUTH
@@ -175,19 +130,14 @@ router.use(detectSuspiciousActivity);
  * ✅ Rate limiting estricto (5 intentos por 15 min)
  * ✅ Logging de eventos de seguridad
  * ✅ Validación básica de formato de token
- * ✅ Validación condicional inteligente de datos adicionales
+ * ✅ Validación y sanitización de datos adicionales
  * ✅ Detección de actividad sospechosa
- * 
- * TIPOS DE LOGIN SOPORTADOS:
- * 🔍 OAuth (Google/Microsoft): Sin validación de perfil
- * 📧 Registro manual: Validación completa de perfil
- * 👤 Anónimo: Sin validación de perfil
  */
 router.post('/firebase-login', 
     authRateLimit,                      // 🛡️ Límite estricto para login
     logAuthEvent('Firebase Login Attempt'), // 📝 Log del intento
     validateFirebaseTokenFormat,        // 🔐 Validación básica de token
-    validateConditionalProfileData,     // 🎯 Validación inteligente según tipo
+    validateProfileData,                // ✅ Validar datos adicionales opcionales
     authController.handleFirebaseLogin  // 🎯 Controlador principal
 );
 
@@ -216,17 +166,19 @@ router.get('/profile/:firebaseUid',
  * PROTECCIONES APLICADAS:
  * ✅ Rate limiting general
  * ✅ Autenticación requerida
- * ✅ Validación estricta de datos de entrada
+ * ✅ Validación de datos de entrada
  * ✅ Logging de modificaciones
  */
 router.put('/profile',
     generalRateLimit,                   // 🛡️ Límite general
     logAuthEvent('Profile Update'),     // 📝 Log de modificación
     isAuthenticated,                    // 🔐 Autenticación requerida
-    validateProfileData,                // ✅ Validación estricta (siempre requerida en updates)
+    validateProfileData,                // ✅ Validar datos de entrada
     authController.updateUserProfile    // 🎯 Controlador
 );
 
+// Endpoint para verificar el estado de la sesión, solo necesita el middleware de auth.
+router.get('/status', firebaseAuthMiddleware, authController.getAuthStatus);
 /**
  * @route GET /api/auth/me
  * @description Obtener perfil del usuario autenticado actual
