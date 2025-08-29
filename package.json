@@ -7,8 +7,12 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "setup": "node setup-env.js",
+    "setup-db": "node setup-database.js",
+    "diagnose": "node diagnose.js",
     "test-db": "node -e \"require('./db/db.js').testConnection().then(() => process.exit(0)).catch(() => process.exit(1))\"",
-    "status": "curl -s http://localhost:3000/api/status | jq . || echo 'Servidor no está ejecutándose'"
+    "status": "curl -s http://localhost:3000/api/status | jq . || echo 'Servidor no está ejecutándose'",
+    "deploy": "npm run setup-db && npm start",
+    "check": "npm run diagnose && npm run test-db"
   },
   "keywords": [
     "firebase",
